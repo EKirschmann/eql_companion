@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="us-ascii"?>
+<XML ID="EQInterfaceDefinitionLanguage">
+  <Schema xmlns="EverQuestData" xmlns:dt="EverQuestDataTypes" />
+  <Label item="LFC_LootFiltersLabel">
+    <ScreenID>LFC_LootFiltersLabel</ScreenID>
+    <RelativePosition>true</RelativePosition>
+    <Location>
+      <X>10</X>
+      <Y>10</Y>
+    </Location>
+    <Size>
+      <CX>120</CX>
+      <CY>14</CY>
+    </Size>
+    <Text>Source Loot Filters</Text>
+    <NoWrap>true</NoWrap>
+    <AlignCenter>false</AlignCenter>
+    <AlignRight>false</AlignRight>
+  </Label>
+  <Listbox item="LFC_LootFiltersList">
+    <ScreenID>LFC_LootFiltersList</ScreenID>
+    <DrawTemplate>WDT_Inner</DrawTemplate>
+    <RelativePosition>true</RelativePosition>
+    <Location>
+      <X>11</X>
+      <Y>26</Y>
+    </Location>
+    <Size>
+      <CX>286</CX>
+      <CY>128</CY>
+    </Size>
+    <Style_Border>true</Style_Border>
+    <Style_VScroll>true</Style_VScroll>
+  </Listbox>
+  <Button item="LFC_MergeButton">
+    <ScreenID>LFC_MergeButton</ScreenID>
+    <RelativePosition>true</RelativePosition>
+    <Location>
+      <X>10</X>
+      <Y>175</Y>
+    </Location>
+    <Size>
+      <CX>70</CX>
+      <CY>20</CY>
+    </Size>
+    <Text>Merge</Text>
+    <TooltipReference>Merge any non-existing item loot filter entries into this character's item loot filters from the selected source character.</TooltipReference>
+	<Template>BDT_Normal</Template>		
+  </Button>
+  <Button item="LFC_ReplaceButton">
+    <ScreenID>LFC_ReplaceButton</ScreenID>
+    <RelativePosition>true</RelativePosition>
+    <Location>
+      <X>228</X>
+      <Y>175</Y>
+    </Location>
+    <Size>
+      <CX>70</CX>
+      <CY>20</CY>
+    </Size>
+    <Text>Replace</Text>
+    <TooltipReference>Replace all of this character's item loot filters with all of the selected source character item loot filters.</TooltipReference>
+	<Template>BDT_Normal</Template>		
+  </Button>
+  <!-- Video Modes Screen -->
+  <Screen item="LootFiltersCopyWnd">
+    <RelativePosition>false</RelativePosition>
+    <Location>
+      <X>320</X>
+      <Y>300</Y>
+    </Location>
+    <Size>
+      <CX>320</CX>
+      <CY>230</CY>
+    </Size>
+    <Text>Copy Loot Filters</Text>
+    <DrawTemplate>WDT_Rounded</DrawTemplate>
+    <Style_Titlebar>true</Style_Titlebar>
+    <Style_Closebox>true</Style_Closebox>
+    <Style_Minimizebox>true</Style_Minimizebox>
+    <Style_Qmarkbox>true</Style_Qmarkbox>
+    <Style_Border>true</Style_Border>
+    <Style_Sizable>false</Style_Sizable>
+    <Pieces>LFC_LootFiltersLabel</Pieces>
+    <Pieces>LFC_LootFiltersList</Pieces>
+    <Pieces>LFC_MergeButton</Pieces>
+    <Pieces>LFC_ReplaceButton</Pieces>
+  </Screen>
+</XML>

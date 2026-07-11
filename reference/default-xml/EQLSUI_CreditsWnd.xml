@@ -1,0 +1,153 @@
+<?xml version = "1.0"?>
+<XML ID = "EQInterfaceDefinitionLanguage">
+	<Schema xmlns = "EverQuestData" xmlns:dt = "EverQuestDataTypes"/>
+
+	<Button item = "Credits_OKButton">
+		<ScreenID>OKButton</ScreenID>
+		<Font>4</Font>
+		<RelativePosition>true</RelativePosition>
+
+		<AutoStretch>true</AutoStretch>
+		<LeftAnchorOffset>40</LeftAnchorOffset>
+		<RightAnchorOffset>155</RightAnchorOffset>
+		<TopAnchorOffset>42</TopAnchorOffset>
+		<BottomAnchorOffset>11</BottomAnchorOffset>
+
+		<RightAnchorToLeft>true</RightAnchorToLeft>
+		<LeftAnchorToLeft>true</LeftAnchorToLeft>
+		<TopAnchorToTop>false</TopAnchorToTop>
+		<BottomAnchorToTop>false</BottomAnchorToTop>
+
+		<TooltipReference>Close this window.</TooltipReference>
+		<Style_Checkbox>false</Style_Checkbox>
+		<Text>OK</Text>
+		<ButtonDrawTemplate>
+			<Normal>A_EQLS_SmallBtnNormal</Normal>
+			<Pressed>A_EQLS_SmallBtnPressed</Pressed>
+			<Flyby>A_EQLS_SmallBtnHover</Flyby>
+			<Disabled>A_EQLS_SmallBtnDisabled</Disabled>
+			<PressedFlyby>A_EQLS_SmallBtnPressedHover</PressedFlyby>
+		</ButtonDrawTemplate>
+	</Button>
+	
+	<Label item = "Credits_WndLabel">
+		<ScreenID>WndLabel</ScreenID>
+		<Font>6</Font>
+		<RelativePosition>true</RelativePosition>
+		<Location>
+			<X>200</X>
+			<Y>15</Y>
+		</Location>
+		<Size>
+			<CX>270</CX>
+			<CY>25</CY>
+		</Size>
+		<Text>GAME CREDITS</Text>
+		<TextColor>
+				<R>56</R>
+				<G>60</G>
+				<B>71</B>
+		</TextColor>
+		<NoWrap>true</NoWrap>
+		<AlignCenter>true</AlignCenter>
+		<AlignRight>false</AlignRight>
+	</Label>
+
+<!-- Current -->
+	<STMLbox item = "Credits_Current">
+		<ScreenID>Credits_Current</ScreenID>
+		<DrawTemplate>WDT_Fade</DrawTemplate>
+		<RelativePosition>true</RelativePosition>
+		<Style_VScroll>true</Style_VScroll>
+		<AutoStretch>true</AutoStretch>
+		<LeftAnchorOffset>4</LeftAnchorOffset>
+		<TopAnchorOffset>4</TopAnchorOffset>
+		<RightAnchorOffset>4</RightAnchorOffset>
+		<BottomAnchorOffset>4</BottomAnchorOffset>
+		<TopAnchorToTop>true</TopAnchorToTop>
+		<BottomAnchorToTop>false</BottomAnchorToTop>
+		<RightAnchorToLeft>false</RightAnchorToLeft>
+		<LeftAnchorToLeft>true</LeftAnchorToLeft>
+		<Style_Border>false</Style_Border>
+	</STMLbox>
+	<Page item = "Credits_Current_Page">
+		<ScreenID>Credits_Current_Page</ScreenID>
+		<RelativePosition>true</RelativePosition>
+		<!-- Pages are sized and positioned by their parent tab -->
+		<Style_VScroll>false</Style_VScroll>
+		<Style_HScroll>false</Style_HScroll>
+		<Style_Transparent>false</Style_Transparent>
+		<TooltipReference>EverQuest Legends</TooltipReference>
+		<DrawTemplate>WDT_Fade</DrawTemplate>
+		<TabText>EverQuest Legends</TabText>
+		<TabTextColor>
+				<R>255</R>
+				<G>255</G>
+				<B>255</B>
+		</TabTextColor>
+		<TabTextActiveColor>
+				<R>255</R>
+				<G>255</G>
+				<B>0</B>
+		</TabTextActiveColor>
+		<Style_Sizable>true</Style_Sizable>
+		<Pieces>Credits_Current</Pieces>
+	</Page>
+	
+	<TabBox item = "Credits_TabWnd">
+		<ScreenID>Credits_TabWnd</ScreenID>
+		<DrawTemplate>WDT_EQLS_Def_NoFrame</DrawTemplate>
+		<RelativePosition>true</RelativePosition>
+		<Style_VScroll>false</Style_VScroll>
+		<AutoStretch>true</AutoStretch>
+		<LeftAnchorOffset>49</LeftAnchorOffset>
+		<TopAnchorOffset>70</TopAnchorOffset>
+		<RightAnchorOffset>56</RightAnchorOffset>
+		<BottomAnchorOffset>72</BottomAnchorOffset>
+		<TopAnchorToTop>true</TopAnchorToTop>
+		<BottomAnchorToTop>false</BottomAnchorToTop>
+		<RightAnchorToLeft>false</RightAnchorToLeft>
+		<LeftAnchorToLeft>true</LeftAnchorToLeft>
+		<Style_Border>true</Style_Border>
+		<TabBorderTemplate>FT_DefParchmentTabBorder</TabBorderTemplate>
+		<PageBorderTemplate>FT_DefParchmentPageBorder</PageBorderTemplate>
+		<Pages>Credits_Current_Page</Pages>
+	</TabBox>
+
+	<Screen item = "credits">
+		<!--<ScreenID/>-->
+		<RelativePosition>true</RelativePosition>
+		<Location>
+			<X>0</X>
+			<Y>0</Y>
+		</Location>
+		<Size>
+			<CX>640</CX>
+			<CY>480</CY>
+		</Size>
+
+		<Text>News</Text>
+		<Style_VScroll>false</Style_VScroll>
+		<Style_HScroll>false</Style_HScroll>
+		<Style_Transparent>false</Style_Transparent>
+		<!--<TooltipReference/>-->
+		<DrawTemplate>WDT_EQLS_Def_NoFrame</DrawTemplate>
+		<Style_Titlebar>false</Style_Titlebar>
+		<Style_Closebox>false</Style_Closebox>
+		<Style_Minimizebox>false</Style_Minimizebox>
+		<Style_Border>false</Style_Border>
+		<Style_Sizable>false</Style_Sizable>
+		<Pieces>EQLS_AltBG01</Pieces>
+		<Pieces>EQLS_AltBG02</Pieces>
+		<Pieces>EQLS_AltBG03</Pieces>
+		<Pieces>EQLS_AltBG04</Pieces>
+		<Pieces>EQLS_AltBG05</Pieces>
+		<Pieces>EQLS_AltBG06</Pieces>
+		<Pieces>Credits_OKButton</Pieces>
+		<Pieces>Credits_TabWnd</Pieces>
+		<Pieces>Credits_WndLabel</Pieces>
+	</Screen>
+
+
+
+</XML>

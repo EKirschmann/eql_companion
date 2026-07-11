@@ -1,0 +1,26 @@
+# Secrets — NEVER commit (.env holds the Anthropic API key)
+.env
+
+# Runtime data: DB, geometry/texture caches, OCR config — all regenerable
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+
+# Full stock backup is large (~200MB) and reproducible from the game install.
+/backup/
+
+# OS cruft
+Thumbs.db
+desktop.ini
+*.bak
+
+# Claude Code local settings
+.claude/

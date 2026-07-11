@@ -1,0 +1,795 @@
+"""EQL Companion backend.
+
+FastAPI app that:
+- tails the EQL log, parses events, tracks character/session state
+- broadcasts events + state over WebSocket (/ws)
+- answers companion questions via the LangGraph agent (/api/chat)
+
+Run: uvicorn backend.main:app --reload
+"""
+import asyncio
+import logging
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from backend.agent.advisor import generate_advice
+from backend.agent.graph import get_agent
+from backend.agent.state import AgentState, ProfileData
+from backend.config import settings
+from backend.game_data import spell_classes
+from backend.geometry_system import geometry3d_for_zone, geometry_for_zone
+from backend.log_system import LogWatcher, discover_log_file
+from backend.log_system.parser import extract_character_from_filename, parse_line
+from backend.log_system import events as ev
+from backend.map_system import find_route, known_zones, load_map, normalize_zone
+from backend.ocr_system import OcrWatcher, load_config as ocr_load_config, \
+    ocr_region, parse_loc_text, save_config as ocr_save_config
+from backend.models import Base, Character, ChatMessageRow, LogEventRow
+from backend.spellbook import load_spellbook
+from backend.state_tracker import CharacterTracker
+from backend.ws_manager import ws_manager
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# check_same_thread=False: milestone writes run in a worker thread (db_writer_loop)
+engine = create_engine(
+    settings.database_url, echo=False,
+    connect_args={"check_same_thread": False}
+    if settings.database_url.startswith("sqlite") else {},
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base.metadata.create_all(bind=engine)
+
+# Lightweight migration: add new columns to pre-existing SQLite tables.
+with engine.connect() as _conn:
+    _cols = {r[1] for r in _conn.exec_driver_sql("PRAGMA table_info(characters)")}
+    for _col, _typ in (("aa_available", "INTEGER"), ("spell_slots", "INTEGER"),
+                       ("owned_aas", "TEXT"), ("aa_synced", "TEXT"),
+                       ("pet_owners", "TEXT")):
+        if _col not in _cols:
+            _conn.exec_driver_sql(f"ALTER TABLE characters ADD COLUMN {_col} {_typ}")
+    _conn.commit()
+
+# Persist these event types to the DB; per-hit spam stays in memory only.
+PERSISTED_EVENTS = {"zone", "level", "kill", "death", "aa", "loot", "skill", "char_info"}
+STATE_BROADCAST_MIN_INTERVAL = 1.0  # seconds
+EVENT_FLUSH_INTERVAL = 0.15  # coalesce events into ~6 WS frames/sec
+EVENT_BUFFER_MAX = 600       # cap the buffer during client-less catch-up bursts
+
+tracker: Optional[CharacterTracker] = None
+watcher: Optional[LogWatcher] = None
+ocr_watcher: Optional[OcrWatcher] = None
+_character_id: Optional[int] = None
+_last_state_broadcast = 0.0
+_advice_cache: Optional[dict] = None
+_advice_sig: Optional[tuple] = None
+_watcher_task: Optional[asyncio.Task] = None
+_last_persisted_aa: Optional[str] = None
+_event_buffer: list = []
+_db_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------- log plumbing
+
+def _load_character_enrichment() -> None:
+    """Bind the tracker to its DB row and load persisted enrichment."""
+    global _character_id
+    db = SessionLocal()
+    row = _sync_character_row(db)
+    _character_id = row.id
+    tracker.playstyle = row.playstyle
+    tracker.class_str = row.class_str
+    tracker.race = row.race
+    tracker.aa_available = row.aa_available
+    tracker.spell_slots = row.spell_slots
+    if row.owned_aas:
+        tracker.owned_aas = dict(row.owned_aas)
+        if row.aa_synced:
+            try:
+                tracker._last_aa_seen = datetime.fromisoformat(row.aa_synced)
+                tracker._aa_from_db = True
+            except ValueError:
+                pass
+    if row.pet_owners:
+        tracker.pet_owners = dict(row.pet_owners)
+    global _last_persisted_aa
+    _last_persisted_aa = row.aa_synced
+    if row.level and not tracker.level:
+        tracker.level = row.level
+    db.close()
+
+
+def _scan_log_characters() -> list:
+    """Characters that have a log in the log dir (/log on in-game creates one)."""
+    log_dir = Path(settings.eql_log_dir)
+    out = []
+    if not log_dir.exists():
+        return out
+    for p in sorted(log_dir.glob("eqlog_*.txt"),
+                    key=lambda x: x.stat().st_mtime, reverse=True):
+        name, server = extract_character_from_filename(p)
+        if name:
+            out.append({"name": name, "server": server, "file": p.name,
+                        "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat()})
+    return out
+
+
+async def switch_character(file_name: str) -> bool:
+    """Retarget the tailer + tracker to another character's log file.
+    Keyed by file (not name): the same name can exist on several servers."""
+    global tracker, watcher, _watcher_task, _advice_cache, _advice_sig
+    log_dir = Path(settings.eql_log_dir).resolve()
+    path = (log_dir / Path(file_name).name).resolve()
+    if path.parent != log_dir or not path.name.startswith("eqlog_") or not path.exists():
+        return False
+    found, _srv = extract_character_from_filename(path)
+    if not found:
+        return False
+    if watcher:
+        watcher.stop()
+    if _watcher_task:
+        _watcher_task.cancel()
+    watcher = LogWatcher(path, on_log_event)
+    tracker = CharacterTracker(watcher.character_name, watcher.server)
+    tracker.spellbook_loader = load_spellbook
+    tracker.has_log = True
+    _load_character_enrichment()
+    await watcher.seed()
+    _watcher_task = asyncio.create_task(watcher.run())
+    if ocr_watcher:
+        ocr_watcher.tracker = tracker
+    _advice_cache = _advice_sig = None
+    await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+    logger.info(f"Switched to {tracker.name} ({tracker.server})")
+    return True
+
+
+def _sync_character_row(db: Session) -> Character:
+    """Get or create the Character row for the tracked character."""
+    row = (db.query(Character)
+           .filter(Character.name == tracker.name,
+                   Character.server == tracker.server).first())
+    if not row:
+        row = Character(name=tracker.name, server=tracker.server)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+async def _check_cast(spell: str) -> None:
+    """Loadout staleness check: two distinct cast spells outside the saved
+    trio's wiki spell lists means the loadout probably changed in-game
+    (swaps log nothing; only /who re-syncs the trio)."""
+    try:
+        if tracker.loadout_hint:
+            return
+        classes = [c.strip() for c in (tracker.class_str or "").split("/") if c.strip()]
+        if not classes:
+            return
+        castable_by = await spell_classes(spell)
+        if not castable_by or castable_by & set(classes):
+            return  # trio can cast it, or we cannot judge (no page / wiki down)
+        tracker.unknown_casts[spell] = ", ".join(sorted(castable_by))
+        if len(tracker.unknown_casts) >= 2:
+            names = "; ".join(f"{s} ({cls})" for s, cls
+                              in list(tracker.unknown_casts.items())[:3])
+            tracker.loadout_hint = (
+                f"You're casting {names} — not castable by {tracker.class_str}. "
+                "Loadout changed? Type /who in-game to re-sync.")
+            await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+    except Exception:
+        logger.exception("Cast/loadout check failed")
+
+
+async def on_log_event(event: ev.LogEvent, live: bool) -> None:
+    tracker.apply(event, live)
+
+    if not live:
+        return
+
+    if event.type in ("other_out", "aa_list", "aa_meta", "who_other"):
+        return  # aggregated into tracker state; raw broadcast would flood the WS
+
+    if event.type == "cast":
+        asyncio.create_task(_check_cast(event.spell))
+
+    # Persist milestones from a worker thread — an inline SQLite commit
+    # (fsync) would stall the tailer/WS loop for milliseconds per kill.
+    if event.type in PERSISTED_EVENTS and _character_id:
+        try:
+            _db_queue.put_nowait({
+                "character_id": _character_id, "event_type": event.type,
+                "payload": event.model_dump(mode="json"), "ts": event.ts,
+                "zone": tracker.zone, "level": tracker.level,
+                "class_str": tracker.class_str,
+                "aa_available": tracker.aa_available,
+            })
+        except asyncio.QueueFull:
+            logger.warning("DB queue full — dropping %s milestone", event.type)
+
+    # Coalesced into batched WS frames by event_flush_loop.
+    _event_buffer.append(event.model_dump(mode="json"))
+    if len(_event_buffer) > EVENT_BUFFER_MAX:
+        del _event_buffer[: len(_event_buffer) - EVENT_BUFFER_MAX]
+
+
+def _persist_milestone(item: dict) -> None:
+    """Runs in a worker thread — keeps SQLite fsyncs off the event loop."""
+    db = SessionLocal()
+    try:
+        if item.get("kind") == "roster":
+            row = db.get(Character, item["character_id"])
+            if row:
+                row.owned_aas = item["owned_aas"]
+                row.aa_synced = item["aa_synced"]
+                row.pet_owners = item["pet_owners"]
+                db.commit()
+            return
+        db.add(LogEventRow(character_id=item["character_id"],
+                           event_type=item["event_type"],
+                           payload=item["payload"], ts=item["ts"]))
+        row = db.get(Character, item["character_id"])
+        if row:
+            if item["zone"]:
+                row.zone = item["zone"]
+            if item["level"]:
+                row.level = item["level"]
+            if item["event_type"] == "aa" and item["aa_available"] is not None:
+                row.aa_available = item["aa_available"]
+            if item["class_str"]:
+                row.class_str = item["class_str"]
+        db.commit()
+    finally:
+        db.close()
+
+
+async def db_writer_loop() -> None:
+    while True:
+        item = await _db_queue.get()
+        try:
+            await asyncio.to_thread(_persist_milestone, item)
+        except Exception:
+            logger.exception("Milestone persist failed")
+
+
+async def _flush_events() -> None:
+    """Send buffered events as ONE frame; piggyback a throttled state push."""
+    global _last_state_broadcast
+    if not _event_buffer:
+        return
+    if not ws_manager.connections:
+        _event_buffer.clear()
+        return
+    batch = _event_buffer.copy()
+    _event_buffer.clear()
+    await ws_manager.broadcast({"type": "events", "data": batch})
+    now = time.monotonic()
+    if now - _last_state_broadcast >= STATE_BROADCAST_MIN_INTERVAL:
+        _last_state_broadcast = now
+        await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+
+
+def _drain_roster_updates() -> None:
+    """Persist AA/pet rosters when they change (they otherwise die with the
+    process once the listing scrolls past the 1MB startup replay)."""
+    global _last_persisted_aa
+    if not tracker or not _character_id:
+        return
+    stamp = tracker._last_aa_seen.isoformat() if tracker._last_aa_seen else None
+    if stamp == _last_persisted_aa and not tracker.pet_owners_dirty:
+        return
+    _last_persisted_aa = stamp
+    tracker.pet_owners_dirty = False
+    try:
+        _db_queue.put_nowait({"kind": "roster", "character_id": _character_id,
+                              "owned_aas": dict(tracker.owned_aas),
+                              "aa_synced": stamp,
+                              "pet_owners": dict(tracker.pet_owners)})
+    except asyncio.QueueFull:
+        logger.warning("DB queue full — roster persist skipped")
+
+
+def _drain_finished_encounters() -> None:
+    """Queue archived pulls for persistence (event_type='encounter')."""
+    if not tracker or not tracker.pending_encounters:
+        return
+    views = list(tracker.pending_encounters)
+    tracker.pending_encounters.clear()
+    if not _character_id:
+        return
+    for view in views:
+        try:
+            _db_queue.put_nowait({
+                "character_id": _character_id, "event_type": "encounter",
+                "payload": view, "ts": datetime.fromisoformat(view["started"]),
+                "zone": tracker.zone, "level": tracker.level,
+                "class_str": tracker.class_str,
+                "aa_available": tracker.aa_available,
+            })
+        except asyncio.QueueFull:
+            logger.warning("DB queue full — dropping encounter record")
+
+
+async def event_flush_loop() -> None:
+    """~6 WS frames/sec regardless of combat intensity (was: 1 frame/swing)."""
+    while True:
+        await asyncio.sleep(EVENT_FLUSH_INTERVAL)
+        try:
+            _drain_roster_updates()
+            _drain_finished_encounters()
+            await _flush_events()
+        except Exception:
+            logger.exception("Event flush failed")
+
+
+async def periodic_state_push():
+    """Every 3s push state so DPS visibly decays to 0 out of combat."""
+    while True:
+        await asyncio.sleep(3.0)
+        if ws_manager.connections:
+            await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global tracker, watcher, ocr_watcher, _character_id, _watcher_task
+
+    log_path = Path(settings.eql_log_path) if settings.eql_log_path else \
+        discover_log_file(Path(settings.eql_log_dir), settings.eql_character_name)
+
+    tasks: list[asyncio.Task] = []
+    if log_path and log_path.exists():
+        watcher = LogWatcher(log_path, on_log_event)
+        tracker = CharacterTracker(watcher.character_name, watcher.server)
+        tracker.spellbook_loader = load_spellbook
+        tracker.has_log = True
+        _load_character_enrichment()  # playstyle etc. survive restarts
+
+        await watcher.seed()
+        _watcher_task = asyncio.create_task(watcher.run())
+        tasks.append(asyncio.create_task(periodic_state_push()))
+        logger.info(f"Companion online for {tracker.name} ({tracker.server})")
+    else:
+        tracker = CharacterTracker(settings.eql_character_name, None)
+        tracker.spellbook_loader = load_spellbook
+        logger.warning(
+            f"No EQL log found in {settings.eql_log_dir} — running without live data")
+
+    ocr_watcher = OcrWatcher(tracker, ws_manager)
+    tasks.append(asyncio.create_task(ocr_watcher.run()))
+    tasks.append(asyncio.create_task(event_flush_loop()))
+    tasks.append(asyncio.create_task(db_writer_loop()))
+
+    yield
+
+    if watcher:
+        watcher.stop()
+    if _watcher_task:
+        _watcher_task.cancel()
+    ocr_watcher.stop()
+    for t in tasks:
+        t.cancel()
+
+
+app = FastAPI(title="EQL Companion", version="0.2.0", lifespan=lifespan)
+
+app.add_middleware(GZipMiddleware, minimum_size=2048)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.frontend_origin],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------------------- API
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class CharacterPatch(BaseModel):
+    playstyle: Optional[str] = None
+    class_str: Optional[str] = None
+    race: Optional[str] = None
+    level: Optional[int] = None
+    aa_available: Optional[int] = None
+    spell_slots: Optional[int] = None
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "watching": watcher.path.name if watcher else None}
+
+
+@app.get("/api/character")
+async def get_character():
+    return tracker.snapshot()
+
+
+@app.patch("/api/character")
+async def patch_character(patch: CharacterPatch, db: Session = Depends(get_db)):
+    row = _sync_character_row(db)
+    for field in ("playstyle", "class_str", "race", "level",
+                  "aa_available", "spell_slots"):
+        value = getattr(patch, field)
+        if value is not None:
+            setattr(row, field, value)
+            setattr(tracker, field, value)
+    if patch.class_str is not None:  # manual trio edit resolves the mismatch hint
+        tracker.unknown_casts.clear()
+        tracker.loadout_hint = None
+    db.commit()
+    await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+    return tracker.snapshot()
+
+
+class CharacterSelect(BaseModel):
+    file: str
+
+
+@app.get("/api/characters")
+async def list_characters():
+    """Every character with a log file, newest first (/log on in-game creates one)."""
+    return {"characters": _scan_log_characters(),
+            "active_file": watcher.path.name if watcher else None}
+
+
+@app.post("/api/character/select")
+async def select_character(body: CharacterSelect):
+    if not await switch_character(body.file):
+        raise HTTPException(status_code=404,
+                            detail=f"No log file {body.file} — type /log on in-game first")
+    return tracker.snapshot()
+
+
+@app.get("/api/aas")
+async def get_owned_aas():
+    """Owned AA ranks parsed from /alternateadv list output in the log."""
+    return {"available": bool(tracker.owned_aas),
+            "synced": tracker._last_aa_seen.isoformat() if tracker._last_aa_seen else None,
+            "aas": [{"name": n, **v} for n, v in sorted(tracker.owned_aas.items())]}
+
+
+@app.post("/api/aas/rescan")
+async def rescan_aas():
+    """Deep-scan the whole log for the most recent /alternateadv list burst
+    (the startup replay only covers the last 1MB)."""
+    if not watcher:
+        raise HTTPException(status_code=400, detail="No log is being watched")
+
+    def scan(path: Path):
+        data = path.read_bytes()
+        idx = data.rfind(b"] Ability #")
+        if idx < 0:
+            return None
+        lo = max(0, data.rfind(b"\n", 0, max(0, idx - 300_000)) + 1)
+        return data[lo:min(len(data), idx + 400_000)].split(b"\n")
+
+    lines = await asyncio.to_thread(scan, watcher.path)
+    if lines is None:
+        return {"found": False,
+                "reason": "No /alternateadv list output anywhere in the log"}
+    for bline in lines:
+        line = bline.decode("utf-8", "replace")
+        if ("Ability #" not in line and "Description:" not in line
+                and "Cost per Level:" not in line):
+            continue
+        e = parse_line(line, tracker.name)
+        if e and e.type in ("aa_list", "aa_meta"):
+            tracker.apply(e, live=False)
+    return {"found": True,
+            "synced": tracker._last_aa_seen.isoformat() if tracker._last_aa_seen else None,
+            "distinct": len(tracker.owned_aas)}
+
+
+@app.get("/api/spellbook")
+async def get_spellbook():
+    """Parsed /outputfile spellbook export for the active character."""
+    book = load_spellbook(tracker.name, tracker.server)
+    if not book:
+        return {"available": False,
+                "reason": "No spellbook export — type /outputfile spellbook in-game"}
+    return {"available": True, **book}
+
+
+@app.get("/api/events")
+async def get_events(limit: int = 100):
+    items = list(tracker.ledger)[-limit:]
+    return {"events": items}
+
+
+@app.get("/api/encounters")
+async def get_encounters(limit: int = 50, db: Session = Depends(get_db)):
+    """Persisted fight history for this character (newest first)."""
+    if not _character_id:
+        return {"encounters": []}
+    rows = (db.query(LogEventRow)
+            .filter(LogEventRow.character_id == _character_id,
+                    LogEventRow.event_type == "encounter")
+            .order_by(LogEventRow.id.desc()).limit(limit).all())
+    return {"encounters": [r.payload for r in rows]}
+
+
+@app.get("/api/advisor")
+async def get_advisor(refresh: bool = False):
+    """Structured counsel: spells, AA spending, horizon, zone picks.
+    Cached until the character context changes or ?refresh=1."""
+    global _advice_cache, _advice_sig
+    book = load_spellbook(tracker.name, tracker.server)
+    sig = (tracker.class_str, tracker.level, tracker.playstyle, tracker.zone,
+           tracker.aa_available, tracker.spell_slots,
+           book["updated"] if book else None, tracker._last_aa_seen)
+    if _advice_cache is not None and _advice_sig == sig and not refresh:
+        return _advice_cache
+    ctx = {
+        "name": tracker.name, "race": tracker.race,
+        "class_str": tracker.class_str, "level": tracker.level,
+        "playstyle": tracker.playstyle, "zone": tracker.zone,
+        "aa_available": tracker.aa_available, "spell_slots": tracker.spell_slots,
+        "recent_activity": tracker.recent_activity_summary(),
+        "recent_casts": tracker.recent_casts(),
+        "spellbook": book,
+        "owned_aas": tracker.owned_aas,
+    }
+    advice = await generate_advice(ctx)
+    _advice_cache, _advice_sig = advice, sig
+    return advice
+
+
+@app.get("/api/map")
+async def get_map(zone: Optional[str] = None):
+    """Vector map data for a zone (defaults to the character's current zone)."""
+    target = zone or tracker.zone
+    if not target:
+        return {"available": False, "zone": None,
+                "reason": "No zone known yet — enter a zone or pass ?zone="}
+    data = load_map(target)
+    if data is None:
+        return {"available": False, "zone": normalize_zone(target),
+                "reason": "No chart exists for this place"}
+    return {"available": True, **data}
+
+
+@app.get("/api/geometry")
+async def get_zone_geometry(zone: Optional[str] = None):
+    """Client-mined 2D wall/floor geometry (defaults to the current zone).
+    Extraction runs in a worker thread and caches to data/geometry/."""
+    target = zone or tracker.zone
+    if not target:
+        return {"available": False, "zone": None,
+                "reason": "No zone known yet — enter a zone or pass ?zone="}
+    data = await asyncio.to_thread(geometry_for_zone, target)
+    if data is None:
+        return {"available": False, "zone": normalize_zone(target),
+                "reason": "No client geometry for this place"}
+    return data
+
+
+@app.get("/api/geometry3d")
+async def get_zone_geometry3d(zone: Optional[str] = None):
+    """Full 3D triangle soup (floors/ramps/walls/props; ceilings excluded)."""
+    target = zone or tracker.zone
+    if not target:
+        return {"available": False, "zone": None,
+                "reason": "No zone known yet — enter a zone or pass ?zone="}
+    data = await asyncio.to_thread(geometry3d_for_zone, target)
+    if data is None:
+        return {"available": False, "zone": normalize_zone(target),
+                "reason": "No client geometry for this place"}
+    return data
+
+
+@app.get("/api/texture/{short}/{name}")
+async def get_zone_texture(short: str, name: str):
+    """Zone texture PNGs exported during 3D extraction."""
+    import re as _re
+    if not (_re.fullmatch(r"[a-z0-9_]+", short) and _re.fullmatch(r"[a-z0-9_.-]+", name)):
+        raise HTTPException(status_code=400, detail="bad texture path")
+    path = Path("data") / "textures" / short / name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="no such texture")
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/zones")
+async def get_zones():
+    """Zones known to the travel graph (for the route search box)."""
+    return {"zones": known_zones()}
+
+
+class OcrRegion(BaseModel):
+    left: int
+    top: int
+    width: int
+    height: int
+
+
+class OcrEnabled(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/ocr/status")
+async def ocr_status():
+    return ocr_watcher.status()
+
+
+@app.post("/api/ocr/region")
+async def ocr_set_region(region: OcrRegion):
+    cfg = ocr_load_config()
+    cfg.update(region.model_dump())
+    ocr_save_config(cfg)
+    return ocr_watcher.status()
+
+
+@app.post("/api/ocr/enabled")
+async def ocr_set_enabled(body: OcrEnabled):
+    cfg = ocr_load_config()
+    cfg["enabled"] = body.enabled
+    ocr_save_config(cfg)
+    return ocr_watcher.status()
+
+
+@app.get("/api/ocr/preview")
+async def ocr_preview():
+    """One-shot capture + OCR of the configured region (for calibration)."""
+    cfg = ocr_load_config()
+    try:
+        text = await ocr_region(cfg)
+        return {"text": text, "parsed": parse_loc_text(text) if text else None}
+    except Exception as e:
+        return {"text": None, "parsed": None, "error": str(e)[:200]}
+
+
+@app.post("/api/overlay")
+async def launch_combat_overlay():
+    """Launch the always-on-top combat strip (backend/overlay.py)."""
+    import subprocess
+    import sys as _sys
+    subprocess.Popen(
+        [_sys.executable, "-m", "backend.overlay"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+    return {"launched": True}
+
+
+@app.post("/api/ocr/overlay")
+async def ocr_launch_overlay():
+    """Launch the on-screen calibration box (backend/ocr_overlay.py)."""
+    import subprocess
+    import sys as _sys
+    subprocess.Popen(
+        [_sys.executable, "-m", "backend.ocr_overlay"],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+    return {"launched": True}
+
+
+@app.get("/api/route")
+async def get_route(to: str, frm: Optional[str] = None):
+    """Shortest zone-hop route. `frm` defaults to the current zone."""
+    start = frm or tracker.zone
+    if not start:
+        return {"path": None, "reason": "Current zone unknown"}
+    path = find_route(start, to)
+    if path is None:
+        return {"path": None,
+                "reason": f"No known route from {normalize_zone(start)} to {normalize_zone(to)}"}
+    return {"path": path}
+
+
+@app.get("/api/chat/history")
+async def chat_history(limit: int = 40, db: Session = Depends(get_db)):
+    if not _character_id:
+        return {"messages": []}
+    rows = (db.query(ChatMessageRow)
+            .filter(ChatMessageRow.character_id == _character_id)
+            .order_by(ChatMessageRow.id.desc()).limit(limit).all())
+    return {"messages": [r.to_dict() for r in reversed(rows)]}
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    # Build profile from live tracker state
+    classes = (tracker.class_str or "").split("/")
+    classes += [None] * (3 - len(classes))
+    profile: ProfileData = {
+        "id": _character_id or 0,
+        "race": tracker.race or "Unknown",
+        "primary_class": (classes[0] or "Unknown").strip(),
+        "secondary_class": (classes[1] or "").strip() or None,
+        "tertiary_class": (classes[2] or "").strip() or None,
+        "level": tracker.level or 1,
+        "playstyle": tracker.playstyle or "balanced",
+    }
+
+    history = []
+    if _character_id:
+        rows = (db.query(ChatMessageRow)
+                .filter(ChatMessageRow.character_id == _character_id)
+                .order_by(ChatMessageRow.id.desc()).limit(10).all())
+        history = [{"role": r.role, "content": r.content} for r in reversed(rows)]
+
+    activity = tracker.recent_activity_summary()
+    book = load_spellbook(tracker.name, tracker.server)
+    if book:
+        latest = ", ".join(s["name"] for s in book["castable"][-10:])
+        activity += (f" Spellbook export: {len(book['castable'])} spells castable "
+                     f"by the current trio (highest: {latest}).")
+
+    state: AgentState = {
+        "profile": profile,
+        "messages": history + [{"role": "user", "content": request.message}],
+        "current_zone": tracker.zone,
+        "recent_activity": activity,
+        "spell_suggestions": [], "aa_suggestions": [],
+        "zone_suggestions": [], "gear_suggestions": [],
+        "reasoning": None, "sources_cited": [], "error": None,
+    }
+
+    try:
+        result = await get_agent().ainvoke(state)
+    except Exception as e:
+        logger.exception("Agent failed")
+        raise HTTPException(status_code=500, detail=f"Companion error: {str(e)[:200]}")
+
+    # Last assistant message is the reply (handles dicts and Message objects)
+    reply = "The companion has nothing to say."
+    for msg in reversed(result.get("messages", [])):
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "type", None)
+        if role in ("assistant", "ai") and content:
+            reply = content
+            break
+
+    if _character_id:
+        db.add(ChatMessageRow(character_id=_character_id, role="user", content=request.message))
+        db.add(ChatMessageRow(character_id=_character_id, role="assistant", content=reply))
+        db.commit()
+
+    return {
+        "response": reply,
+        "suggestions": {
+            "spells": result.get("spell_suggestions", []),
+            "aas": result.get("aa_suggestions", []),
+            "zones": result.get("zone_suggestions", []),
+        },
+    }
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws_manager.connect(ws)
+    try:
+        await ws.send_json({"type": "hello", "data": tracker.snapshot()})
+        while True:
+            await ws.receive_text()  # keepalive / ignore client messages
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws)
+    except Exception:
+        ws_manager.disconnect(ws)
