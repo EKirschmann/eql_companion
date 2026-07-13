@@ -38,11 +38,25 @@ injected, purely passive.
 Node 22+) for structured spell/AA data. Without it the app fetches the wiki
 over plain HTTP automatically — no Node beyond the UI is required.
 
-## Setup
+## Setup — the easy way
 
 ```
 git clone https://github.com/EKirschmann/eql_companion
 cd eql_companion
+install_companion.bat
+```
+
+The installer pulls dependencies, then a short wizard finds your EverQuest
+Legends install (scans all drives; or paste the path), offers to download
+the [Brewall map pack](https://www.eqmaps.info/eq-map-files/) for the 2D
+Atlas charts (the 3D view mines the game's own files — nothing to download),
+and asks which counsel model to use — including **none**. Every answer just
+fills in `.env`; change any of it later by editing that file, or re-run
+`python setup_wizard.py`.
+
+## Setup — by hand
+
+```
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 copy .env.example .env
@@ -50,7 +64,8 @@ copy .env.example .env
 
 Edit `.env` and set `EQL_GAME_DIR` to your EverQuest Legends install folder
 (the default is the launcher's standard path; logs and maps are found inside
-it automatically).
+it automatically). Optional 2D dungeon charts: extract the Brewall pack from
+<https://www.eqmaps.info/eq-map-files/> into `<game dir>\maps\Dark Brewall`.
 
 ## Run
 
