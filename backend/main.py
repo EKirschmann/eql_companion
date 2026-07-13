@@ -456,7 +456,9 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-app = FastAPI(title="EQL Companion", version="0.2.0", lifespan=lifespan)
+APP_VERSION = "1.0.0"  # bump together with frontend/lib/version.ts
+
+app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(

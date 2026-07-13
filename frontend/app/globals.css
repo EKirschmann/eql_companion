@@ -1440,3 +1440,11 @@ body {
   color: var(--heal);
   overflow-wrap: anywhere;
 }
+
+.app-version {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.82em;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiSend } from "@/lib/api";
 import type { LedgerRow, Snapshot, WsMessage } from "@/lib/types";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { APP_VERSION } from "@/lib/version";
 import { AdvisorPanel } from "@/components/AdvisorPanel";
 import { AtlasPanel } from "@/components/AtlasPanel";
 import { CharacterPanel } from "@/components/CharacterPanel";
@@ -94,7 +95,9 @@ export default function Home() {
     <main className="hud">
       <header className="hud-header">
         <div>
-          <div className="eyebrow">EQL Companion</div>
+          <div className="eyebrow">
+            EQL Companion <span className="app-version">v{APP_VERSION}</span>
+          </div>
           <h1 className="nameplate">{snap?.name ?? "—"}</h1>
           <div className="nameplate-sub">
             {snap?.server ?? ""}
