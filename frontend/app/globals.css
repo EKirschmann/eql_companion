@@ -1391,3 +1391,52 @@ body {
   color: #16130f;
   border-color: var(--gold-bright);
 }
+
+/* ---- OCR setup guide modal ---- */
+.ocr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 13, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.ocr-modal {
+  background: rgba(18, 21, 26, 0.97);
+  border: 1px solid var(--hairline);
+  max-width: 520px;
+  padding: 20px 24px;
+  font-size: 13.5px;
+}
+.ocr-modal h3 {
+  font-family: var(--font-display), serif;
+  color: var(--gold);
+  margin: 0 0 6px;
+}
+.ocr-modal-note {
+  color: var(--ink-dim, rgba(230, 222, 202, 0.7));
+  margin: 0 0 10px;
+}
+.ocr-modal ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+.ocr-modal code {
+  font-family: var(--font-mono), monospace;
+  color: var(--gold-bright);
+}
+.ocr-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ocr-modal-preview {
+  margin-top: 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--heal);
+  overflow-wrap: anywhere;
+}

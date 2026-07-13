@@ -223,6 +223,8 @@ export const AtlasPanel = memo(function AtlasPanel({
   const [route, setRoute] = useState<string[] | null>(null);
   const [routeMsg, setRouteMsg] = useState<string | null>(null);
   const [ocr, setOcr] = useState<OcrStatus | null>(null);
+  const [ocrHelp, setOcrHelp] = useState(false);
+  const [ocrPreview, setOcrPreview] = useState<string | null>(null);
   const [view, setView] = useState<"chart" | "geo" | "3d">("chart");
   const [floorSel, setFloorSel] = useState<"auto" | "all" | number>("auto");
   const [geom, setGeom] = useState<ZoneGeometry | null>(null);
@@ -396,6 +398,29 @@ export const AtlasPanel = memo(function AtlasPanel({
       await apiSend("/api/ocr/overlay", {});
     } catch {
       /* backend offline */
+    }
+  };
+
+  const testRead = async () => {
+    setOcrPreview("reading…");
+    try {
+      const r = await apiGet<{ text: string | null; parsed: { x: number; y: number; z: number } | null; error?: string }>(
+        "/api/ocr/preview",
+      );
+      if (r.parsed) {
+        setOcrPreview(`✓ read X:${r.parsed.x} Y:${r.parsed.y} Z:${r.parsed.z}`);
+      } else if (r.text) {
+        setOcrPreview(
+          `box sees "${r.text.slice(0, 60)}" — not an X/Y/Z readout` +
+            (ocr?.enabled && ocr?.last_ok
+              ? " this frame (live tracking is working; single frames sometimes misread)"
+              : "; move or resize the box"),
+        );
+      } else {
+        setOcrPreview(r.error ? `capture failed: ${r.error}` : "box sees nothing — is the game visible?");
+      }
+    } catch {
+      setOcrPreview("backend offline");
     }
   };
 
@@ -715,10 +740,48 @@ export const AtlasPanel = memo(function AtlasPanel({
           />
           OCR
         </label>
-        <button type="button" onClick={calibrate} disabled={!ocr?.deps_ok}>
+        <button type="button" onClick={() => { setOcrPreview(null); setOcrHelp(true); }} disabled={!ocr?.deps_ok}>
           Calibrate
         </button>
       </div>
+
+      {ocrHelp && (
+        <div className="ocr-modal-backdrop" role="dialog" aria-modal="true" aria-label="OCR setup guide">
+          <div className="ocr-modal">
+            <h3>Live position via screen reading</h3>
+            <p className="ocr-modal-note">
+              The companion reads the map window&apos;s coordinate text off your
+              screen once a second — purely passive, nothing touches the game.
+            </p>
+            <ol>
+              <li>
+                In game, open the <strong>Map window</strong> with its location
+                readout visible — the lines starting <code>X:</code>{" "}
+                <code>Y:</code> <code>Z:</code>. The game must run{" "}
+                <strong>Windowed or Borderless</strong>, not exclusive
+                Fullscreen.
+              </li>
+              <li>
+                Press <strong>Launch calibrator</strong> — a gold box appears on
+                top of the game. Drag and resize it so it{" "}
+                <strong>tightly frames the X / Y / Z lines</strong> (nothing
+                else). Close the box to save.
+              </li>
+              <li>
+                Press <strong>Test read</strong> — it should echo your
+                coordinates. Then flip the <strong>OCR</strong> toggle on and
+                the Atlas dot follows you.
+              </li>
+            </ol>
+            <div className="ocr-modal-actions">
+              <button type="button" onClick={calibrate}>Launch calibrator</button>
+              <button type="button" onClick={testRead}>Test read</button>
+              <button type="button" onClick={() => setOcrHelp(false)}>Close</button>
+            </div>
+            {ocrPreview && <div className="ocr-modal-preview">{ocrPreview}</div>}
+          </div>
+        </div>
+      )}
     </section>
   );
 });
