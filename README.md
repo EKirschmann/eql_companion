@@ -79,6 +79,4 @@ Then press **check exports** and **Consult** in the Advisor tab.
   `eqlog_*.txt` in the folder
 - Everything stays local: logs, exports, and counsel never leave your machine
   unless you point the LLM at a hosted API
-- `skin/` holds StoneGlass, an earlier (abandoned) in-game UI skin project —
-  unrelated to the companion, kept for reference
 - Full architecture and extension docs: `CLAUDE.md`
