@@ -119,16 +119,27 @@ class MCPClient:
     async def wiki_page(self, title: str, max_characters: int = 40_000) -> Optional[dict]:
         sc = await self.call_tool(
             "eql_wiki_page", {"title": title, "maxCharacters": max_characters})
-        return (sc or {}).get("page")
+        page = (sc or {}).get("page")
+        if page:
+            return page
+        # no MCP server (not cloned / Node missing / disabled): plain HTTP
+        from backend.wiki_http import fetch_page_text
+        return await fetch_page_text(title, max_characters)
 
     async def wiki_search(self, query: str, limit: int = 10) -> List[dict]:
         sc = await self.call_tool("eql_wiki_search", {"query": query, "limit": limit})
-        return (sc or {}).get("results", [])
+        if sc:
+            return sc.get("results", [])
+        from backend.wiki_http import search_pages
+        return await search_pages(query, limit)
 
     async def wiki_category_pages(self, category: str, limit: int = 50) -> List[dict]:
         sc = await self.call_tool(
             "eql_wiki_category_pages", {"category": category, "limit": limit})
-        return (sc or {}).get("pages", [])
+        if sc:
+            return sc.get("pages", [])
+        from backend.wiki_http import category_pages
+        return await category_pages(category, limit)
 
 
 _mcp_client: Optional[MCPClient] = None

@@ -222,6 +222,7 @@ export interface AdvisorLoadout {
   name: string;
   cls: string;
   reason: string;
+  level?: number | null;
 }
 
 export interface AdvisorReplace {
@@ -264,10 +265,51 @@ export interface SpellbookInfo {
   other_loadouts?: string[];
 }
 
+export type ExportsStatus = Record<string, {
+  found: boolean;
+  file?: string;
+  updated?: string;
+  age_hours?: number;
+  count?: number | null;
+}>;
+
 export interface OwnedAAsInfo {
   available: boolean;
   synced: string | null;
   aas: { name: string; id: number; ranks: number; cost: number | null; desc: string | null }[];
+}
+
+export interface GearSlot {
+  slot: string;
+  current: string | null;
+  recommend: string | null;
+  why: string;
+  where?: string | null;
+}
+
+export interface GearFarm {
+  item: string;
+  slot: string | null;
+  zone: string | null;
+  source: string | null;
+  why: string;
+}
+
+export interface GearExalt {
+  name: string;
+  move_to: string | null;
+  why: string;
+}
+
+export interface GearAdvice {
+  source: "llm" | "builtin";
+  generated: string;
+  note: string | null;
+  context: Record<string, unknown>;
+  slots: GearSlot[];
+  farm: GearFarm[];
+  exaltations: GearExalt[];
+  unknown: string[];
 }
 
 export interface Advice {
@@ -287,10 +329,39 @@ export interface Advice {
     spellbook_count: number | null;
   };
   loadout: AdvisorLoadout[];
+  must_have: AdvisorLoadout[];
+  should_have: AdvisorLoadout[];
+  nice_to_have: AdvisorLoadout[];
+  prebuffs: AdvisorLoadout[];
   replace: AdvisorReplace[];
   aa_now: AdvisorAA[];
   aa_save: AdvisorAA[];
   horizon: AdvisorHorizon[];
   locations: AdvisorLocation[];
   class_notes: AdvisorClassNote[];
+}
+
+export interface HuntingZone {
+  zone: string;
+  band: string;
+  marks: number[];
+  levels: number[];
+  at_level: boolean;
+}
+
+export interface HuntingData {
+  level: number | null;
+  zones: HuntingZone[];
+}
+
+export interface LlmOption {
+  provider: string;
+  model: string;
+  label: string;
+}
+
+export interface LlmInfo {
+  active: { provider: string; model: string };
+  options?: LlmOption[];
+  openai_key_set: boolean;
 }

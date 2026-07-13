@@ -1,55 +1,84 @@
-# EverQuest Legends — Modern UI Overhaul (`StoneGlass`)
+# EQL Companion
 
-A custom UI skin for EverQuest Legends in a **dark translucent glass + warm gold**
-direction: dark semi-transparent panels, a thin gold hairline border, flat solid
-gauges, and a tidied, more readable layout. Built **additively** — the stock
-`uifiles\default` skin is never modified, and the shipped file set stays small so
-client patches rarely affect it.
+A real-time companion app for **EverQuest Legends**. It tails your combat log
+and gives you a live HUD in the browser — no game files touched, nothing
+injected, purely passive.
 
-> Full project guide, design tokens, technical reference, and TODO live in
-> **`CLAUDE.md`**. This README is the quick start.
+**What you get**
 
-## Layout
+- **Vitals & War Ledger** — live DPS, session stats, hit rate, XP, loot, a
+  streaming combat feed, per-pull encounter breakdowns and group DPS
+- **Atlas** — zone charts with a live position dot, zone-to-zone routing,
+  "true walls" mined from the game's own map geometry, and a textured 3D
+  dollhouse view with a follow camera
+- **Advisor** — spell loadout, AA spending, upgrade warnings, gear-slot
+  recommendations, exaltation tracking, and where-to-hunt picks — grounded in
+  your actual spellbook/inventory exports and the EQL wiki, with every
+  suggestion machine-verified (owned, level-legal, not superseded)
+- **Overlay** — an optional always-on-top combat strip over the game
+
+## Requirements
+
+- **Windows 10/11** (log tailing works anywhere, but OCR position tracking
+  and the overlay are Windows-only)
+- **Python 3.11+**
+- **Node.js 18+** (serves the web UI)
+- EverQuest Legends with logging enabled (type `/log on` in game once)
+
+**Optional — pick zero or one LLM for reasoned counsel:**
+
+| Option | Needs | Notes |
+|---|---|---|
+| None (deterministic) | nothing | default-ready; mechanical but honest counsel, instant |
+| LM Studio | a local model | free, private; ~26B MoE models work well |
+| OpenAI | an API key | best quality; a consult is ~7k tokens |
+| Custom endpoint | any OpenAI-compatible URL | Groq / OpenRouter / Gemini compat / LAN — free tiers work |
+
+**Optional — EQL MCP server** ([ArtSabintsev/everquest-legends-mcp](https://github.com/ArtSabintsev/everquest-legends-mcp),
+Node 22+) for structured spell/AA data. Without it the app fetches the wiki
+over plain HTTP automatically — no Node beyond the UI is required.
+
+## Setup
 
 ```
-eql_mods/
-├── skin/                 # THE skin (additive) — deploy source
-│   ├── EQUI.xml          #   manifest copy + our modern include
-│   ├── EQUI_Modern.xml   #   custom textures, gauge/border anims, glass templates
-│   ├── EQUI_*.xml        #   restyled core HUD windows (Player, Target, Group, …)
-│   ├── modern_glass.tga  #   dark glass panel background
-│   └── modern_atlas.tga  #   gold / fill / track / clear swatches
-├── reference/
-│   ├── default-xml/      # pristine stock XMLs (diff base) + HTML design prototypes
-│   └── modern-xml/       # Daybreak's shipped default_modern XMLs (ideas)
-├── tools/                # _config / gen_textures / restyle / tga / deploy / restore
-├── docs/_archive/        # abandoned full-copy approach (reference only)
-└── backup/               # full stock backup (git-ignored, ~200MB)
+git clone https://github.com/EKirschmann/eql_companion
+cd eql_companion
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
+copy .env.example .env
 ```
 
-## Workflow
+Edit `.env` and set `EQL_LOG_DIR` to your game's `Logs` folder (default:
+`G:\Daybreak Game Company\Installed Games\EverQuest Legends\Logs`).
 
-1. **Retune look:** edit the palette in `tools/gen_textures.py` (glass/gold) and/or
-   `tools/restyle.py` (bar tints).
-2. **Regenerate:** `python tools/gen_textures.py` and
-   `python tools/restyle.py EQUI_PlayerWindow.xml …` (reads pristine reference,
-   writes `skin/`; idempotent).
-3. **Deploy:** `pwsh tools/deploy.ps1`  → `…\uifiles\StoneGlass\`
-4. **In-game:** `/loadskin StoneGlass` (revert with `/loadskin default`).
-5. **Remove from disk:** `pwsh tools/restore.ps1`
+## Run
 
-## Status
+`start_companion.bat` — or two terminals:
 
-- [x] Project scaffold, full stock backup, deploy tooling
-- [x] Additive modern layer (glass/inset templates, flat gauge + gold-border anims, textures)
-- [x] Core HUD restyled & deployed — Player, Target, ToT, Extended Target, Buffs,
-      Songs, Casting, Spell gems, Hotbars, Group, Pet, EQ dock
-- [ ] **In-game look review** (awaiting client availability on release)
-- [ ] Flat/gold titlebar art (titled windows still show stock titlebar)
-- [ ] Inventory window
-- [ ] Layout / declutter pass (after visual direction confirmed in-engine)
+```
+uvicorn backend.main:app --reload     # backend on :8000
+cd frontend && npm run dev            # UI on :3000
+```
 
-## Engine constraints (known, by design)
+Open **http://localhost:3000**, then in game type:
 
-- **Fonts** are fixed engine bitmaps (`<Font>1..5`) — no custom TTF from XML.
-- **No smooth animation / cooldown sweeps** — only frame-cycled texture anims.
+| Command | Why |
+|---|---|
+| `/log on` | start writing the combat log (once per character) |
+| `/who` | teaches the app your level + class trio |
+| `/outputfile spellbook` · `inventory` · `missingspells` | grounds the Advisor in what you own |
+| `/alternateadv list` | syncs your AA ranks |
+| `/loc` | drops a position fix on the Atlas (or enable OCR tracking) |
+
+Then press **check exports** and **Consult** in the Advisor tab.
+
+## Notes
+
+- Sessions survive backend restarts (state snapshots to `data/`)
+- One active character at a time; the header dropdown switches between every
+  `eqlog_*.txt` in the folder
+- Everything stays local: logs, exports, and counsel never leave your machine
+  unless you point the LLM at a hosted API
+- `skin/` holds StoneGlass, an earlier (abandoned) in-game UI skin project —
+  unrelated to the companion, kept for reference
+- Full architecture and extension docs: `CLAUDE.md`

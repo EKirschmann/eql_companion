@@ -205,6 +205,7 @@ is `_build_llm()` in `graph.py` (full walkthrough in the "Model Swapping" sectio
 - `GET /api/texture/{short}/{name}` — zone texture PNGs exported during 3D extraction (`data/textures/`)
 - `GET /api/advisor?refresh=` — structured counsel JSON (see Advisor section)
 - `GET /api/spellbook` — parsed `/outputfile spellbook` export (owned spells; levels = castable by current trio, 255 = other loadouts)
+- `GET /api/exports` · `POST /api/exports/refresh` — presence/freshness of all `/outputfile` kinds (Spellbook, MissingSpells, Inventory, Achievements); refresh = the "check exports" button after the in-game macro. Inventory worn slots + near-level missing spells feed the advisor context
 - `GET /api/aas` — owned AA ranks parsed from `/alternateadv list` log output (one Ability line per rank; Cost/Description attached)
 - `GET /api/ocr/status` · `POST /api/ocr/enabled {enabled}` · `POST /api/ocr/region {left,top,width,height}`
 - `GET /api/ocr/preview` — one-shot capture+OCR of the region (calibration aid)
@@ -291,15 +292,28 @@ Consult button).
   (`mcp_client.py`, proper initialize handshake) and fails soft to ungrounded
   counsel when it's absent.
 - **LLM**: whatever `_build_llm()` provides — currently LM Studio with
-  qwen/qwen3-4b-2507. Start LM Studio's local server (Developer tab); set the
-  model's context length ≥16k; enable JIT loading + idle auto-unload for
-  load-on-demand. If the LLM call fails the endpoint returns a
+  gemma-4-26b-a4b-it (MoE: 26B-class quality, ~140 tok/s, ~39s/consult).
+  This model generation ALWAYS emits thinking tokens first (LM Studio
+  returns them in reasoning_content; they count against max_tokens), so the
+  advisor binds max_tokens=12000 and local models must be loaded with
+  context ≥24k. Alternatives in .env comments: qwen3-4b (fast/shallow),
+  qwen3.6-27b (dense thinker — 3-5 min/consult, not interactive). Start LM
+  Studio's local server (Developer tab); JIT loading + idle auto-unload
+  give load-on-demand. If the LLM call fails the endpoint returns a
   `source:"builtin"` fallback so the tab never breaks.
 - **Class trio / AA points / spell slots**: not derivable from logs — set once
   in the tab's controls (`PATCH /api/character`, persisted to the characters
   table; SQLite columns are auto-migrated at startup). AA gains parsed from
   the log auto-increment `aa_available` afterward.
 - Footer shows grounding: "wiki-grounded" vs "from memory" (approximate names).
+- **LLM output is machine-verified before display**: loadout picks must be
+  owned AND at/below the character's level; travel magic (rings/circles/
+  zephyrs/gate/succor — RITUALS in EQL, teleport SPAs 26/83/88/104) is
+  stripped from loadout + replace; replace pairs must share primary effect,
+  sign, and target type with the upgrade hitting harder; picks superseded by
+  another OWNED usable spell are dropped (e.g. Reanimation when Reconstitution
+  is owned). Long-duration buffs go to a separate `prebuffs` section (memorize
+  → cast → swap the slot). Failing entries are dropped and logged, never shown.
 
 **WebSocket `/ws`** (frontend auto-reconnects, sends "ping" keepalives):
 ```json
@@ -381,7 +395,7 @@ Companion panel, not a separate route.
 ```
 ANTHROPIC_API_KEY=sk-ant-...           # optional — agent falls back without it
 LLM_PROVIDER=lmstudio                  # anthropic | openai | lmstudio | local
-MODEL=qwen/qwen3-4b-2507               # must match the id LM Studio shows
+MODEL=gemma-4-26b-a4b-it               # must match the id LM Studio shows
 
 MCP_ENABLED=true                       # EQL wiki grounding for the Advisor
 MCP_SERVER_DIR=G:\projects\everquest-legends-mcp

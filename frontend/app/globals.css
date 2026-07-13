@@ -1292,3 +1292,102 @@ body {
 
 .adv-rescan:hover:not(:disabled) { color: var(--gold); border-color: var(--hairline); }
 .adv-rescan:disabled { opacity: 0.5; cursor: default; }
+
+.adv-scan-result {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--hairline-dim);
+  font-size: 11.5px;
+  font-family: var(--font-mono), monospace;
+  color: var(--dmg-in);
+  animation: row-in 160ms ease-out;
+}
+
+.adv-scan-result[data-ok="true"] { color: var(--heal); }
+
+.adv-gear-btn { margin-left: 10px; text-transform: none; letter-spacing: 0; }
+
+/* ---- Leveling chart (hunting-zone Gantt) ---- */
+.hunt-gantt {
+  display: grid;
+  gap: 5px;
+  padding: 8px 0 2px;
+}
+.hg-row {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.hg-head { margin-bottom: 2px; }
+.hg-label {
+  font-size: 12px;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.75));
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hg-picked .hg-label { color: var(--gold-bright); }
+.hg-track {
+  position: relative;
+  height: 16px;
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline-dim);
+}
+.hg-head .hg-track {
+  height: 14px;
+  border-color: transparent;
+}
+.hg-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hairline-dim);
+}
+.hg-seg {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: rgba(200, 170, 110, 0.32);
+  box-shadow: inset 0 0 0 1px var(--hairline-dim);
+}
+.hg-picked .hg-seg {
+  background: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold-bright);
+}
+.hg-now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--heal);
+}
+.hg-tick,
+.hg-now-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.6));
+}
+.hg-now-label {
+  color: var(--heal);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.adv-llm-warn {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--in-dmg, #d4574a);
+}
+
+.adv-table tr[data-dim] td { opacity: 0.55; }
+
+.overlay-btn[data-on] {
+  background: var(--gold);
+  color: #16130f;
+  border-color: var(--gold-bright);
+}

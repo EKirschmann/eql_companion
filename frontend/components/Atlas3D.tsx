@@ -56,6 +56,7 @@ export const Atlas3D = memo(function Atlas3D({
     floors: true, ramps: true, walls: true, props: true,
   });
   const [wallOpacity, setWallOpacity] = useState(0.5);
+  const [follow, setFollow] = useState(true);
 
   // fetch the 3D payload per zone (extracted + cached server-side)
   useEffect(() => {
@@ -134,6 +135,14 @@ export const Atlas3D = memo(function Atlas3D({
           </label>
         ))}
         <label className="atlas3d-toggle">
+          <input
+            type="checkbox"
+            checked={follow}
+            onChange={(e) => setFollow(e.target.checked)}
+          />
+          follow hero
+        </label>
+        <label className="atlas3d-toggle">
           wall {Math.round(wallOpacity * 100)}%
           <input
             type="range"
@@ -146,7 +155,7 @@ export const Atlas3D = memo(function Atlas3D({
         </label>
         {!geom && <span className="geo-note">Mining the zone…</span>}
         {geom && !geom.available && <span className="geo-note">{geom.reason}</span>}
-        {geom?.available && <span className="geo-note">drag to orbit · scroll to zoom</span>}
+        {geom?.available && <span className="geo-note">drag to orbit · scroll to zoom · pan releases follow</span>}
       </div>
       <div className="atlas3d-mount" ref={mountRef} />
       <Atlas3DEffects
@@ -154,6 +163,8 @@ export const Atlas3D = memo(function Atlas3D({
         show={show}
         wallOpacity={wallOpacity}
         position={position}
+        follow={follow}
+        onFollowBreak={() => setFollow(false)}
         sceneRef={sceneRef}
       />
     </div>
@@ -167,14 +178,36 @@ function Atlas3DEffects({
   show,
   wallOpacity,
   position,
+  follow,
+  onFollowBreak,
   sceneRef,
 }: {
   geom: ZoneGeometry3D | null;
   show: Record<LayerKey, boolean>;
   wallOpacity: number;
   position: Position | null;
+  follow: boolean;
+  onFollowBreak: () => void;
   sceneRef: React.MutableRefObject<SceneRefs | null>;
 }) {
+  const followRef = useRef(follow);
+  followRef.current = follow;
+
+  // panning drags the orbit target off the hero — release the follow lock,
+  // exactly like dragging the 2D chart does
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const onEnd = () => {
+      if (followRef.current && s.hero.visible
+          && s.controls.target.distanceTo(s.hero.position) > 10) {
+        onFollowBreak();
+      }
+    };
+    s.controls.addEventListener("end", onEnd);
+    return () => s.controls.removeEventListener("end", onEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneRef.current]);
   // (re)build layer groups when a zone payload arrives
   useEffect(() => {
     const s = sceneRef.current;
@@ -257,18 +290,28 @@ function Atlas3DEffects({
     s.render();
   }, [show, wallOpacity, sceneRef]);
 
-  // hero marker: tracker /loc (x=locX, y=locY, z) -> WLD space (locY, locX, z)
+  // hero marker: tracker /loc (x=locX, y=locY, z) -> WLD space (locY, locX, z).
+  // With follow on, camera and orbit target translate by the hero's delta so
+  // whatever angle/zoom the user set is preserved while tracking.
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
     if (position) {
       s.hero.position.set(position.y, position.x, position.z);
       s.hero.visible = true;
+      if (follow) {
+        const delta = s.hero.position.clone().sub(s.controls.target);
+        if (delta.lengthSq() > 0.01) {
+          s.camera.position.add(delta);
+          s.controls.target.copy(s.hero.position);
+          s.controls.update();
+        }
+      }
     } else {
       s.hero.visible = false;
     }
     s.render();
-  }, [position, geom, sceneRef]);
+  }, [position, follow, geom, sceneRef]);
 
   return null;
 }

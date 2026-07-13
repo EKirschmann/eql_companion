@@ -8,6 +8,7 @@ FastAPI app that:
 Run: uvicorn backend.main:app --reload
 """
 import asyncio
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -23,11 +24,12 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.agent.advisor import generate_advice
+from backend.agent.advisor import generate_advice, generate_gear_advice
 from backend.agent.graph import get_agent
 from backend.agent.state import AgentState, ProfileData
 from backend.config import settings
-from backend.game_data import spell_classes
+from backend.game_data import hunting_candidates, spell_classes
+from backend import session_state
 from backend.geometry_system import geometry3d_for_zone, geometry_for_zone
 from backend.log_system import LogWatcher, discover_log_file
 from backend.log_system.parser import extract_character_from_filename, parse_line
@@ -36,7 +38,8 @@ from backend.map_system import find_route, known_zones, load_map, normalize_zone
 from backend.ocr_system import OcrWatcher, load_config as ocr_load_config, \
     ocr_region, parse_loc_text, save_config as ocr_save_config
 from backend.models import Base, Character, ChatMessageRow, LogEventRow
-from backend.spellbook import load_spellbook
+from backend.spellbook import (clear_find_cache, exports_status,
+                               load_export, load_spellbook)
 from backend.state_tracker import CharacterTracker
 from backend.ws_manager import ws_manager
 
@@ -73,8 +76,44 @@ watcher: Optional[LogWatcher] = None
 ocr_watcher: Optional[OcrWatcher] = None
 _character_id: Optional[int] = None
 _last_state_broadcast = 0.0
+ADVICE_CACHE_FILE = Path("data/advice_cache.json")
+
+
+def _sig_norm(sig: tuple) -> tuple:
+    """Signatures survive a JSON roundtrip only as strings — normalize both
+    sides of every comparison."""
+    return tuple("" if x is None else str(x) for x in sig)
+
+
+def _save_advice_cache() -> None:
+    try:
+        ADVICE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ADVICE_CACHE_FILE.write_text(json.dumps({
+            "advice": _advice_cache,
+            "advice_sig": list(_advice_sig) if _advice_sig else None,
+            "gear": _gear_cache,
+            "gear_sig": list(_gear_sig) if _gear_sig else None,
+        }), encoding="utf-8")
+    except Exception:
+        logger.exception("Advice-cache save failed")
+
+
+def _load_advice_cache() -> None:
+    global _advice_cache, _advice_sig, _gear_cache, _gear_sig
+    try:
+        d = json.loads(ADVICE_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    _advice_cache = d.get("advice")
+    _advice_sig = tuple(d["advice_sig"]) if d.get("advice_sig") else None
+    _gear_cache = d.get("gear")
+    _gear_sig = tuple(d["gear_sig"]) if d.get("gear_sig") else None
+
+
 _advice_cache: Optional[dict] = None
 _advice_sig: Optional[tuple] = None
+_gear_cache: Optional[dict] = None
+_gear_sig: Optional[tuple] = None
 _watcher_task: Optional[asyncio.Task] = None
 _last_persisted_aa: Optional[str] = None
 _event_buffer: list = []
@@ -344,11 +383,15 @@ async def event_flush_loop() -> None:
 
 
 async def periodic_state_push():
-    """Every 3s push state so DPS visibly decays to 0 out of combat."""
+    """Every 3s push state so DPS visibly decays to 0 out of combat, and
+    snapshot the session to disk so restarts don't wipe it."""
     while True:
         await asyncio.sleep(3.0)
         if ws_manager.connections:
             await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
+        if watcher:
+            await asyncio.to_thread(session_state.save, tracker,
+                                    str(watcher.path), watcher._offset)
 
 
 @asynccontextmanager
@@ -366,7 +409,25 @@ async def lifespan(app: FastAPI):
         tracker.has_log = True
         _load_character_enrichment()  # playstyle etc. survive restarts
 
-        await watcher.seed()
+        # session continuity: restore the last snapshot if it belongs to this
+        # log file, then resume the tailer from the saved byte offset so the
+        # downtime gap replays through the normal live path (counted once).
+        restored = False
+        st = session_state.load()
+        if st and st.get("log_file") == str(log_path):
+            try:
+                size = log_path.stat().st_size
+                off = int(st.get("offset") or 0)
+                if 0 < off <= size:
+                    session_state.restore(tracker, st)
+                    watcher._offset = off
+                    restored = True
+                    logger.info("Session restored — replaying %d bytes of "
+                                "downtime log", size - off)
+            except Exception:
+                logger.exception("Session restore failed — reseeding")
+        if not restored:
+            await watcher.seed()
         _watcher_task = asyncio.create_task(watcher.run())
         tasks.append(asyncio.create_task(periodic_state_push()))
         logger.info(f"Companion online for {tracker.name} ({tracker.server})")
@@ -376,6 +437,7 @@ async def lifespan(app: FastAPI):
         logger.warning(
             f"No EQL log found in {settings.eql_log_dir} — running without live data")
 
+    _load_advice_cache()  # consults survive restarts
     ocr_watcher = OcrWatcher(tracker, ws_manager)
     tasks.append(asyncio.create_task(ocr_watcher.run()))
     tasks.append(asyncio.create_task(event_flush_loop()))
@@ -384,6 +446,7 @@ async def lifespan(app: FastAPI):
     yield
 
     if watcher:
+        session_state.save(tracker, str(watcher.path), watcher._offset)
         watcher.stop()
     if _watcher_task:
         _watcher_task.cancel()
@@ -505,6 +568,20 @@ async def rescan_aas():
             "distinct": len(tracker.owned_aas)}
 
 
+@app.get("/api/exports")
+async def get_exports():
+    """Presence + freshness of every /outputfile export kind."""
+    return exports_status(tracker.name, tracker.server)
+
+
+@app.post("/api/exports/refresh")
+async def refresh_exports():
+    """Fresh directory scan — the 'check exports' button after running the
+    in-game macro (/outputfile achievements|inventory|missingspells|spellbook)."""
+    clear_find_cache()
+    return exports_status(tracker.name, tracker.server)
+
+
 @app.get("/api/spellbook")
 async def get_spellbook():
     """Parsed /outputfile spellbook export for the active character."""
@@ -533,17 +610,77 @@ async def get_encounters(limit: int = 50, db: Session = Depends(get_db)):
     return {"encounters": [r.payload for r in rows]}
 
 
+@app.get("/api/llm")
+async def api_llm_get():
+    from backend.llm_runtime import active, custom_model, openai_model
+    options = [
+        {"provider": "none", "model": "builtin",
+         "label": "None — deterministic (no LLM)"},
+        {"provider": "lmstudio", "model": settings.model,
+         "label": f"Local — {settings.model}"},
+        {"provider": "openai", "model": openai_model(),
+         "label": f"OpenAI — {openai_model()}"},
+    ]
+    if settings.custom_base_url:
+        options.append({"provider": "custom", "model": custom_model(),
+                        "label": f"Custom — {custom_model()}"})
+    return {
+        "active": active(),
+        "options": options,
+        "openai_key_set": bool(settings.openai_api_key),
+    }
+
+
+@app.post("/api/llm")
+async def api_llm_set(body: dict):
+    """Switch the counsel model (Advisor tab). Clears the advice caches so
+    the next consult regenerates with the newly selected model."""
+    from backend.llm_runtime import active, set_active
+    provider = (body.get("provider") or "").strip()
+    if provider not in ("none", "lmstudio", "openai", "custom"):
+        raise HTTPException(400, "provider must be none|lmstudio|openai|custom")
+    global _advice_cache, _gear_cache
+    set_active(provider, body.get("model"))
+    _advice_cache = None
+    _gear_cache = None
+    _save_advice_cache()
+    return {"active": active(), "openai_key_set": bool(settings.openai_api_key)}
+
+
+@app.get("/api/hunting")
+async def api_hunting(level: int | None = None):
+    """In-era hunting zones bracketing the level, for the leveling chart.
+    Deterministic (community Recommended-Levels table) — no LLM involved."""
+    lv = level if level is not None else tracker.level
+    if not lv:
+        return {"level": None, "zones": []}
+    try:
+        zones = await hunting_candidates(int(lv))
+    except Exception:
+        zones = []
+    return {"level": int(lv), "zones": zones}
+
+
 @app.get("/api/advisor")
-async def get_advisor(refresh: bool = False):
+async def get_advisor(refresh: bool = False, cached: bool = False):
     """Structured counsel: spells, AA spending, horizon, zone picks.
-    Cached until the character context changes or ?refresh=1."""
+    Cached until the character context changes or ?refresh=1.
+    cached=1: return the cached counsel if fresh, else {"cached": false}
+    WITHOUT running the LLM — the tab restores results on load with it."""
     global _advice_cache, _advice_sig
     book = load_spellbook(tracker.name, tracker.server)
+    inv_sig = load_export(tracker.name, tracker.server, "Inventory")
+    miss_sig = load_export(tracker.name, tracker.server, "MissingSpells")
     sig = (tracker.class_str, tracker.level, tracker.playstyle, tracker.zone,
            tracker.aa_available, tracker.spell_slots,
-           book["updated"] if book else None, tracker._last_aa_seen)
+           book["updated"] if book else None, tracker._last_aa_seen,
+           inv_sig["updated"] if inv_sig else None,
+           miss_sig["updated"] if miss_sig else None)
+    sig = _sig_norm(sig)
     if _advice_cache is not None and _advice_sig == sig and not refresh:
         return _advice_cache
+    if cached:
+        return {"cached": False}
     ctx = {
         "name": tracker.name, "race": tracker.race,
         "class_str": tracker.class_str, "level": tracker.level,
@@ -554,8 +691,42 @@ async def get_advisor(refresh: bool = False):
         "spellbook": book,
         "owned_aas": tracker.owned_aas,
     }
+    inv = load_export(tracker.name, tracker.server, "Inventory")
+    if inv and inv.get("worn"):
+        ctx["inventory_worn"] = inv["worn"]
+    miss = load_export(tracker.name, tracker.server, "MissingSpells")
+    if miss and tracker.level:
+        ctx["missing_spells"] = [
+            s for s in miss["castable"] if s["level"] <= tracker.level + 3][:25]
     advice = await generate_advice(ctx)
     _advice_cache, _advice_sig = advice, sig
+    _save_advice_cache()
+    return advice
+
+
+@app.get("/api/gear")
+async def get_gear(refresh: bool = False, cached: bool = False):
+    """Equipment counsel: best owned item per slot + farming targets.
+    Slower than /api/advisor on first run (mines item pages from the wiki).
+    cached=1: return the cached counsel if fresh, else {"cached": false}
+    WITHOUT running the LLM — the tab uses it to restore results on load."""
+    global _gear_cache, _gear_sig
+    inv = load_export(tracker.name, tracker.server, "Inventory")
+    sig = (tracker.class_str, tracker.level, tracker.race,
+           inv["updated"] if inv else None)
+    sig = _sig_norm(sig)
+    if _gear_cache is not None and _gear_sig == sig and not refresh:
+        return _gear_cache
+    if cached:
+        return {"cached": False}
+    ctx = {"class_str": tracker.class_str, "level": tracker.level,
+           "race": tracker.race, "playstyle": tracker.playstyle,
+           "worn": (inv or {}).get("worn"),
+           "inventory_items": (inv or {}).get("items"),
+           "exaltations": (inv or {}).get("exaltations")}
+    advice = await generate_gear_advice(ctx)
+    _gear_cache, _gear_sig = advice, sig
+    _save_advice_cache()
     return advice
 
 
@@ -664,17 +835,35 @@ async def ocr_preview():
         return {"text": None, "parsed": None, "error": str(e)[:200]}
 
 
+_overlay_proc = None
+
+
 @app.post("/api/overlay")
-async def launch_combat_overlay():
-    """Launch the always-on-top combat strip (backend/overlay.py)."""
+async def toggle_combat_overlay():
+    """Toggle the always-on-top combat strip (backend/overlay.py): one press
+    launches it, the next press closes it — never a second copy."""
+    global _overlay_proc
     import subprocess
     import sys as _sys
-    subprocess.Popen(
+    if _overlay_proc is not None and _overlay_proc.poll() is None:
+        _overlay_proc.terminate()
+        try:
+            _overlay_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            _overlay_proc.kill()
+        _overlay_proc = None
+        return {"running": False}
+    _overlay_proc = subprocess.Popen(
         [_sys.executable, "-m", "backend.overlay"],
         cwd=str(Path(__file__).resolve().parent.parent),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
-    return {"launched": True}
+    return {"running": True}
+
+
+@app.get("/api/overlay")
+async def overlay_status():
+    return {"running": _overlay_proc is not None and _overlay_proc.poll() is None}
 
 
 @app.post("/api/ocr/overlay")

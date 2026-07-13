@@ -21,6 +21,7 @@ from typing import List, Optional
 
 from backend.cache import wiki_page_cache
 from backend.config import settings
+from backend.map_system import _canonical
 from backend.mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,111 @@ def compact_spells(page_text: str, lo: int, hi: int) -> List[str]:
 
 # Spell pages carry a "Classes" section: "Necromancer - Level 1" per line.
 RE_CLASS_LINE = re.compile(r"^([A-Z][A-Za-z ]+?) - Level \d+\s*$", re.MULTILINE)
+
+
+async def spell_record(name: str) -> Optional[dict]:
+    """Full structured spell record from the builds db (cached 24h)."""
+    key = name.strip().lower()
+    cached = wiki_page_cache.get("spell_record", key)
+    if cached is not None:
+        return cached or None
+    sc = await get_mcp_client().call_tool(
+        "eql_builds_spell", {"idOrName": name.strip()})
+    sp = (sc or {}).get("spell")
+    if sc is not None:  # server answered — cache even a miss
+        wiki_page_cache.set(sp or {}, WIKI_TTL, "spell_record", key)
+    return sp
+
+
+# Teleport-family SPAs: 26 gate, 83 teleport (rings/circles), 88 succor/
+# evac, 104 translocate (zephyrs). In EQL all of these are RITUALS cast
+# outside the spell bar — they must never be suggested for memorization.
+TRAVEL_SPAS = {26, 83, 88, 104}
+_TRAVEL_NAMES = ("ring of", "circle of", "zephyr", "translocate", "portal")
+
+
+async def is_travel_ritual(name: str) -> bool:
+    low = name.strip().lower()
+    if low.startswith(_TRAVEL_NAMES[:2]) or any(t in low for t in _TRAVEL_NAMES[2:]):
+        return True
+    rec = await spell_record(name)
+    if not rec:
+        return False
+    return any((e.get("effectId") in TRAVEL_SPAS)
+               for e in (rec.get("effects") or []))
+
+
+RES_SPA = 81  # resurrect: returns a dead player to their corpse with xp
+# Effects whose baseValue is an ID, not a magnitude — never comparable
+# ("Summon Drink supersedes Hammer of Striking" was a real bug: both are
+# SPA 32 and the summoned item id compared as if it were power).
+NONCOMPARABLE_SPAS = {32, 33, 85, 113}
+
+
+async def is_resurrection(name: str) -> bool:
+    """The res line (Reanimation/Reconstitution/Reparation) sounds like
+    healing but is not — LLMs keep calling it 'self-sustain'. Detected by
+    effect id so future ranks are covered automatically."""
+    rec = await spell_record(name)
+    if not rec:
+        return False
+    return any(e.get("effectId") == RES_SPA for e in (rec.get("effects") or []))
+
+
+async def supersedes_for_slots(using: str, upgrade: str) -> bool:
+    """Stricter than same_spell_line: for LOADOUT pruning the two spells
+    must also share the exact castable-class set. Cross-class near-twins
+    (Smite vs Careless Lightning) both deserve slots — different lines,
+    resists, and timing — while true line-mates (Barbcoat -> Bramblecoat)
+    share one class list and prune correctly."""
+    if not await same_spell_line(using, upgrade):
+        return False
+    ra = await spell_record(using)
+    rb = await spell_record(upgrade)
+    ca = {str(x).lower() for x in (ra or {}).get("classes") or []}
+    cb = {str(x).lower() for x in (rb or {}).get("classes") or []}
+    return bool(ca) and ca == cb
+
+
+def _primary_effect(rec: dict):
+    """(effectId, base, magnitude) of the most meaningful effect.
+    Symbol-style spells lead with zero-value placeholder slots (id 10
+    charisma spacers), so prefer nonzero magnitudes; rank-1 spells like
+    Reanimation legitimately carry base 0, so fall back to non-spacer
+    effects rather than giving up."""
+    effects = rec.get("effects") or []
+    effs = [e for e in effects if e.get("baseValue")]
+    if not effs:
+        effs = [e for e in effects if e.get("effectId") not in (None, 10)]
+    if not effs:
+        return None
+    prim = max(effs, key=lambda e: abs(e.get("baseValue") or 0))
+    base = prim.get("baseValue") or 0
+    return (prim.get("effectId"), base, abs(base))
+
+
+async def same_spell_line(using: str, upgrade: str) -> bool:
+    """True only when `upgrade` plausibly supersedes `using`: both are real
+    spells doing the SAME JOB (same primary effect id and direction, same
+    target type) with the upgrade hitting harder. Kills hallucinated pairs
+    like a teleport 'upgrading' to a nuke — an LLM judgment this codebase
+    no longer trusts unverified."""
+    ra = await spell_record(using)
+    rb = await spell_record(upgrade)
+    if not ra or not rb:
+        return False
+    if ra.get("targetTypeId") != rb.get("targetTypeId"):
+        return False
+    pa = _primary_effect(ra)
+    pb = _primary_effect(rb)
+    if not pa or not pb:
+        return False
+    if pa[0] in NONCOMPARABLE_SPAS or pb[0] in NONCOMPARABLE_SPAS:
+        return False
+    if pa[0] != pb[0] or pb[2] <= pa[2]:
+        return False
+    # signs must agree unless one side is a zero-magnitude rank-1
+    return pa[1] == 0 or pb[1] == 0 or (pa[1] > 0) == (pb[1] > 0)
 
 
 _TRADESKILLS = {
@@ -254,3 +360,217 @@ async def build_wiki_context(classes: List[str], level: Optional[int],
         parts.append("## AAs: [tab] name (ranks, cost per rank) effect\n" + cached)
 
     return "\n\n".join(parts)[:max_chars]
+
+# ------------------------------------------------------------------- gear
+
+ITEM_STAT_PREFIXES = ("Slot:", "AC:", "DMG:", "Skill:", "Effect:", "Haste:")
+ITEM_STAT_TOKENS = ("STR:", "STA:", "AGI:", "DEX:", "WIS:", "INT:", "CHA:",
+                    "HP:", "MANA:", "SV ", "Atk Delay:")
+
+
+def _strip_upgrade(name: str) -> str:
+    """'Raw-Hide Cloak +4' -> 'Raw-Hide Cloak' (wiki pages use base names)."""
+    return re.sub(r"\s*\+\d+$", "", name.strip())
+
+
+def _compact_item(text: str) -> Optional[str]:
+    """One advisor-ready line from an item wiki page, or None when the page
+    is not an equippable item (no Slot/DMG lines)."""
+    head, _, tail = text.partition("Drops From")
+    stats = []
+    for line in head.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("Race:"):
+            # classic-era race lists predate EQL races (no IKS on 1999
+            # items) and EQL does not enforce them — omit to avoid false
+            # "not equippable" advice
+            continue
+        if (s.startswith(ITEM_STAT_PREFIXES) or s.startswith("Class:")
+                or any(t in s for t in ITEM_STAT_TOKENS)):
+            stats.append(s)
+    if not any(s.startswith(("Slot:", "DMG:", "Skill:")) for s in stats):
+        return None
+    drops = []
+    if tail:
+        section = tail.split("Sold by")[0]
+        zone = None
+        for para in re.split(r"\n\s*\n", section):
+            lines = [x.strip() for x in para.strip().splitlines() if x.strip()]
+            if not lines:
+                continue
+            if len(lines) == 1 and _canonical(lines[0]):
+                zone = lines[0]
+            elif zone:
+                drops.append(f"{zone} ({lines[0]})")
+                zone = None
+            if len(drops) >= 3:
+                break
+    sold = "vendor-buyable" if "sold by merchants" in text else ""
+    parts = ["; ".join(stats)]
+    if drops:
+        parts.append("drops: " + ", ".join(drops))
+    if sold:
+        parts.append(sold)
+    return " | ".join(parts)
+
+
+async def item_line(name: str) -> Optional[str]:
+    """Compact stat line for an item (wiki, cached 24h). None = no page or
+    not equipment."""
+    base = _strip_upgrade(name)
+    key = base.lower()
+    cached = wiki_page_cache.get("item_line2", key)
+    if cached is not None:
+        return cached or None
+    page = await get_mcp_client().wiki_page(base, max_characters=4000)
+    if page is None:
+        # no page OR wiki down — indistinguishable here, so cache the miss
+        # briefly (1h) rather than re-fetching 40+ consumables per consult
+        wiki_page_cache.set("", 3600, "item_line2", key)
+        return None
+    line = _compact_item(page.get("text", ""))
+    wiki_page_cache.set(line or "", WIKI_TTL, "item_line2", key)
+    return line
+
+
+def _trio_usable(line: str, classes: list) -> Optional[bool]:
+    """EQL rule: an item is equippable when ANY ONE of the trio's classes
+    is on its Class line (or Class: ALL). None = no class data on the item."""
+    from backend.log_system.parser import CLASS_ABBREV
+    m = re.search(r"Class: ([A-Z ]+?)(?:;|\||$)", line)
+    if not m:
+        return None
+    tokens = set(m.group(1).split())
+    if "ALL" in tokens:
+        return True
+    abbrs = {a for a, full in CLASS_ABBREV.items()
+             if full.lower() in {c.strip().lower() for c in classes}}
+    return bool(tokens & abbrs)
+
+
+async def build_gear_context(items: list, classes: Optional[list] = None,
+                             max_items: int = 100) -> dict:
+    """Stat lines for every unique owned item that has an equipment page,
+    annotated with deterministic trio eligibility so the LLM never does the
+    class math itself. Returns {"lines": [...], "unknown": [names]} — first
+    run mines the wiki (~0.5s/item), afterwards it's all cache."""
+    seen: dict = {}
+    for it in items:
+        base = _strip_upgrade(it["name"])
+        entry = seen.setdefault(base.lower(), {"name": it["name"],
+                                               "where": set()})
+        entry["where"].add(it["where"])
+        if it["where"] == "worn":
+            entry["name"] = it["name"]  # prefer the worn (+N) display name
+    lines, unknown = [], []
+    for key, entry in list(seen.items())[:max_items]:
+        line = await item_line(entry["name"])
+        if line:
+            where = "/".join(sorted(entry["where"]))
+            tag = ""
+            if classes:
+                usable = _trio_usable(line, classes)
+                if usable is True:
+                    tag = " [USABLE]"
+                elif usable is False:
+                    tag = " [NOT USABLE by this trio]"
+            lines.append(f"{entry['name']} [{where}]{tag} — {line}")
+        else:
+            unknown.append(entry["name"])
+            where = "/".join(sorted(entry["where"]))
+            lines.append(f"{entry['name']} [{where}] — STATS UNKNOWN "
+                         "(no wiki page; do not invent numbers for this item)")
+    return {"lines": lines, "unknown": unknown}
+
+
+# ------------------------------------------------------------------ hunting
+
+# The community "Recommended Levels and ZEM List" table. The rendered page
+# collapses empty table cells, so we parse the RAW WIKITEXT: each row is
+# "| [[Zone]]{{...}} || cell || cell ..." and a non-blank cell under a level
+# column means the zone has content at that level. ZEM values themselves are
+# unpublished ("?") — the level marks are the signal.
+ZEM_RAW_URL = ("https://eqlwiki.com/index.php"
+               "?title=Recommended_Levels_and_ZEM_List&action=raw")
+IN_ERA_SECTIONS = {"Antonica", "Odus", "Faydwer", "Planes"}
+IN_ERA_PLANES = {"Plane of Fear", "Plane of Hate", "Plane of Sky"}
+# Marked in the table (city guards give XP) but never hunting recommendations.
+CITY_ZONES = {
+    "North Qeynos", "South Qeynos", "Surefall Glade", "Halas", "Rivervale",
+    "Oggok", "Grobb", "East Freeport", "West Freeport", "North Freeport",
+    "Neriak Foreign Quarter", "Neriak Commons", "Neriak Third Gate",
+    "Erudin", "Erudin Palace", "Paineel", "North Kaladim", "South Kaladim",
+    "Northern Felwithe", "Southern Felwithe", "Ak'Anon",
+}
+
+_RE_ZEM_SECTION = re.compile(r"^=+\s*([^=]+?)\s*=+\s*$")
+_RE_ZEM_ZONE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+
+
+def _parse_zem_wikitext(text: str) -> dict:
+    zones: dict = {}
+    section, cols = None, []
+    for line in text.splitlines():
+        m = _RE_ZEM_SECTION.match(line)
+        if m:
+            section = m.group(1).strip()
+            continue
+        if line.startswith("! Zone"):
+            cols = [int(t) for t in re.findall(r"\d+", line)]
+            continue
+        if section not in IN_ERA_SECTIONS or not line.startswith("| "):
+            continue
+        nm = _RE_ZEM_ZONE.search(line)
+        if not nm or not cols:
+            continue
+        zone = nm.group(1).strip()
+        if section == "Planes" and zone not in IN_ERA_PLANES:
+            continue
+        cells = line.split("||")[1:]
+        marks = [lv for lv, c in zip(cols, cells) if c.strip()]
+        if marks:
+            zones[zone] = marks
+    return zones
+
+
+async def zem_zone_levels() -> dict:
+    """In-era zone -> sorted marked level columns (cached 24h; {} offline)."""
+    cached = wiki_page_cache.get("zem_levels_wt")
+    if cached is not None:
+        return cached
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=20)) as s:
+            async with s.get(ZEM_RAW_URL) as r:
+                r.raise_for_status()
+                text = await r.text()
+    except Exception:
+        return {}
+    zones = _parse_zem_wikitext(text)
+    if zones:
+        wiki_page_cache.set(zones, WIKI_TTL, "zem_levels_wt")
+    return zones
+
+
+async def hunting_candidates(level: int) -> list:
+    """Non-city, in-era zones with content at the level (marked at the
+    bracketing 5-level columns), best fits first."""
+    zones = await zem_zone_levels()
+    base = max(1, 5 * (level // 5))
+    nxt = 5 * (level // 5) + 5
+    out = []
+    for zone, marks in zones.items():
+        if zone in CITY_ZONES:
+            continue
+        hit = [m for m in marks if m in (base, nxt)]
+        if hit:
+            out.append({"zone": zone, "band": f"{min(marks)}-{max(marks)}",
+                        "marks": hit, "levels": marks,
+                        "at_level": base in hit})
+    out.sort(key=lambda z: (0 if base in z["marks"] else 1,
+                            int(z["band"].split("-")[1])
+                            - int(z["band"].split("-")[0])))
+    return out

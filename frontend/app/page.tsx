@@ -21,6 +21,13 @@ interface CharacterEntry {
 
 export default function Home() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [overlayOn, setOverlayOn] = useState(false);
+
+  useEffect(() => {
+    apiGet<{ running: boolean }>("/api/overlay")
+      .then((r) => setOverlayOn(r.running))
+      .catch(() => {});
+  }, []);
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [centerTab, setCenterTab] = useState<"atlas" | "companion" | "advisor">("atlas");
 
@@ -121,10 +128,15 @@ export default function Home() {
           <button
             type="button"
             className="overlay-btn"
-            onClick={() => apiSend("/api/overlay", {}).catch(() => {})}
-            title="Launch the always-on-top combat strip (Scroll Lock ON = move it, OFF = click-through)"
+            data-on={overlayOn ? "1" : undefined}
+            onClick={() =>
+              apiSend<{ running: boolean }>("/api/overlay", {})
+                .then((r) => setOverlayOn(r.running))
+                .catch(() => {})
+            }
+            title="Toggle the always-on-top combat strip (Scroll Lock ON = move it, OFF = click-through)"
           >
-            Overlay
+            {overlayOn ? "Overlay ✕" : "Overlay"}
           </button>
           <div className="link" data-status={status}>
             <span className="link-rune" aria-hidden />

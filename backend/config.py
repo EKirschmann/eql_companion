@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     llm_provider: str = "anthropic"           # "anthropic" | "openai" | "lmstudio" | "local"
     model: str = "claude-3-5-sonnet-20241022"
     lmstudio_base_url: str = "http://localhost:1234/v1"
+    openai_api_key: str = ""                  # frontier option (Advisor tab)
+    openai_model: str = "o3"                  # default when provider=openai
+    custom_base_url: str = ""                 # any OpenAI-compatible server
+    custom_api_key: str = ""                  # (Groq, OpenRouter, Gemini, ...)
+    custom_model: str = ""
 
     # Database
     database_url: str = "sqlite:///./data/companion.db"

@@ -24,25 +24,9 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _build_llm():
-    """Instantiate the chat model per settings. Add providers here."""
-    if settings.llm_provider == "openai":
-        from langchain_openai import ChatOpenAI  # requires langchain-openai
-        return ChatOpenAI(model=settings.model)
-    if settings.llm_provider == "lmstudio":
-        # LM Studio speaks the OpenAI API. Start its local server (Developer
-        # tab); enable JIT model loading + idle auto-unload for load-on-demand.
-        from langchain_openai import ChatOpenAI  # requires langchain-openai
-        return ChatOpenAI(model=settings.model, base_url=settings.lmstudio_base_url,
-                          api_key="lm-studio", temperature=0.3)
-    if settings.llm_provider == "local":
-        from langchain_ollama import ChatOllama  # requires langchain-ollama
-        return ChatOllama(model=settings.model)
-    from langchain_anthropic import ChatAnthropic
-    return ChatAnthropic(model=settings.model, api_key=settings.anthropic_api_key or "unset")
-
-
-llm = _build_llm()
+# Provider construction + runtime local/frontier switching live in
+# backend/llm_runtime.py — get_llm() returns the currently selected model.
+from backend.llm_runtime import get_llm
 
 
 def _content_of(message) -> str:
@@ -126,7 +110,7 @@ async def respond(state: AgentState) -> dict:
             "emphasize multiclass synergy, and reference the live log context "
             "if given.\n\n" + context
         )
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        response = await get_llm().ainvoke([HumanMessage(content=prompt)])
         if response.content:
             text = response.content
     except Exception as e:
