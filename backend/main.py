@@ -47,6 +47,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # check_same_thread=False: milestone writes run in a worker thread (db_writer_loop)
+Path("data").mkdir(exist_ok=True)  # sqlite cannot create the directory itself
 engine = create_engine(
     settings.database_url, echo=False,
     connect_args={"check_same_thread": False}

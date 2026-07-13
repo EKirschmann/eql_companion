@@ -48,8 +48,9 @@ cd frontend && npm install && cd ..
 copy .env.example .env
 ```
 
-Edit `.env` and set `EQL_LOG_DIR` to your game's `Logs` folder (default:
-`G:\Daybreak Game Company\Installed Games\EverQuest Legends\Logs`).
+Edit `.env` and set `EQL_GAME_DIR` to your EverQuest Legends install folder
+(the default is the launcher's standard path; logs and maps are found inside
+it automatically).
 
 ## Run
 
