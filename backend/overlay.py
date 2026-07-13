@@ -49,7 +49,7 @@ class OverlayStrip:
                             font=("Consolas", 10))
         self.enc.pack(anchor="w", padx=12)
         self.group = tk.Label(self.root, text="", fg=MUTED, bg=BG,
-                              font=("Consolas", 9))
+                              font=("Consolas", 9), justify="left")
         self.group.pack(anchor="w", padx=12)
         self.hint = tk.Label(self.root, text="", fg=MUTED, bg=BG,
                              font=("Consolas", 7))
@@ -127,9 +127,13 @@ class OverlayStrip:
                 self.enc.configure(
                     text=f"{target} · {enc.get('duration', 0):g}s · "
                          f"{enc.get('total_damage', 0):,} dmg")
+                # group (4) / raid (8): ranked damage-meter rows
                 allies = enc.get("allies") or []
-                self.group.configure(text="  ".join(
-                    f"{a['name']} {a['dps']:g}" for a in allies[:3]))
+                rows = [
+                    f"{(a.get('name') or '?')[:14]:<14}{a.get('dps', 0):>8g}"
+                    for a in allies[:8]
+                ]
+                self.group.configure(text=chr(10).join(rows))
             else:
                 self.enc.configure(text="no encounter")
                 self.group.configure(text="")
