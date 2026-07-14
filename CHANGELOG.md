@@ -4,6 +4,15 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.2.0 — 2026-07-14
+
+- **Details-style damage meter overlay**: ranked class-colored bars over the
+  game (like the WoW Details! addon) — bar length shows share of the leader,
+  each row shows damage (or DPS) and percent of the group total, up to raid
+  size. Two modes (Damage | DPS — click the title) and two segments (this
+  fight | last 5 fights — click the right side of the header) while Scroll
+  Lock is ON; click-through as always when it's OFF.
+
 ## v1.1.0 — 2026-07-14
 
 - **Update checker**: click the version badge in the header to compare your
