@@ -150,3 +150,21 @@ def class_aa_lines(classes: list) -> Optional[list]:
             out.append(f"[{cat}] {name} (ranks {a.get('maxRank', '?')}, "
                        f"cost {cost}) {desc}")
     return out
+
+
+def spell_id(name: str) -> Optional[int]:
+    """eqlbuilds spell id — the SAME id space the game's LO*.ini spell
+    loadouts use (verified against live sets)."""
+    hit = _index().get((name or "").strip().lower())
+    return hit["entry"].get("id") if hit else None
+
+
+def spell_name(sid: int) -> Optional[str]:
+    d = classes_data()
+    if not d:
+        return None
+    if _cache.get("id_index") is None:
+        _cache["id_index"] = {s["id"]: s["name"]
+                              for c in d.values()
+                              for s in c.get("spellList") or []}
+    return _cache["id_index"].get(sid)

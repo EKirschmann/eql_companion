@@ -176,6 +176,23 @@ export const AdvisorPanel = memo(function AdvisorPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const writeSpellSet = async () => {
+    try {
+      const r = await apiSend<{ name: string; count: number; memspellset: string; skipped: string[]; note: string }>(
+        "/api/spellsets/generate",
+        {},
+      );
+      flashScanResult(
+        `set "${r.name}" written (${r.count} spells) — in game: ${r.memspellset}` +
+          (r.skipped.length ? ` · no id for: ${r.skipped.join(", ")}` : "") +
+          ` · ${r.note}`,
+        true,
+      );
+    } catch (e) {
+      flashScanResult(`spell-set write failed: ${e instanceof Error ? e.message : "backend error"}`, false);
+    }
+  };
+
   const consultGear = async (refresh: boolean) => {
     setGearLoading(true);
     try {
@@ -438,6 +455,14 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   Memorize now
                   {snap?.spell_slots != null &&
                     ` — ${advice.loadout.length}/${snap.spell_slots} slots filled`}
+                  <button
+                    type="button"
+                    className="adv-rescan adv-gear-btn"
+                    onClick={writeSpellSet}
+                    title={'Write these picks as an in-game spell set ("companion") — then /memspellset companion loads the whole bar'}
+                  >
+                    write in-game spell set
+                  </button>
                 </h3>
                 {([
                   ["Must have", advice.must_have, 0],

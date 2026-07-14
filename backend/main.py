@@ -457,7 +457,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.2.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.3.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -585,6 +585,60 @@ async def refresh_exports():
     in-game macro (/outputfile achievements|inventory|missingspells|spellbook)."""
     clear_find_cache()
     return exports_status(tracker.name, tracker.server)
+
+
+@app.get("/api/spellsets")
+async def get_spellsets():
+    """Saved in-game spell sets from the character's LO*.ini, ids decoded."""
+    from backend import builds_data
+    from backend.spellsets import find_loadout_ini, read_spell_sets
+    path = find_loadout_ini(tracker.name, tracker.server)
+    if not path:
+        return {"available": False,
+                "reason": "no <name>_<server>_LO*.ini in the game folder"}
+    sets = await asyncio.to_thread(read_spell_sets, path)
+    for s in sets:
+        s["spells"] = [builds_data.spell_name(i) or f"#{i}"
+                       for i in s.pop("spell_ids")]
+    return {"available": True, "file": path.name, "sets": sets}
+
+
+@app.post("/api/spellsets/generate")
+async def generate_spellset(body: dict | None = None):
+    """Write the advisor's Memorize-now list as an in-game spell set.
+    One command in game then loads the whole bar: /memspellset <name>."""
+    from backend import builds_data
+    from backend.spellsets import find_loadout_ini, write_spell_set
+    name = ((body or {}).get("name") or "companion").strip()[:24]
+    if _advice_cache is None:
+        raise HTTPException(400, "no counsel cached — press Consult first")
+    picks = ((_advice_cache.get("must_have") or [])
+             + (_advice_cache.get("should_have") or []))
+    if not picks:
+        raise HTTPException(400, "the cached counsel has no loadout picks")
+    path = find_loadout_ini(tracker.name, tracker.server)
+    if not path:
+        raise HTTPException(404, "no LO*.ini found in the game folder")
+    ids, written, skipped = [], [], []
+    for pck in picks:
+        sid = builds_data.spell_id(pck.get("name"))
+        if sid is None:
+            skipped.append(pck.get("name"))
+        else:
+            ids.append(sid)
+            written.append(pck.get("name"))
+    if not ids:
+        raise HTTPException(500, "could not resolve any spell ids "
+                                 "(eqlbuilds snapshot missing?)")
+    try:
+        result = await asyncio.to_thread(write_spell_set, path, name, ids)
+    except ValueError as e:
+        raise HTTPException(500, str(e))
+    return {**result, "written": written, "skipped": skipped,
+            "memspellset": f"/memspellset {name}",
+            "note": "The game reads this file at login — if the character "
+                    "is logged in, camp to character select and back "
+                    "before /memspellset (logging out overwrites the file)."}
 
 
 @app.get("/api/spellbook")

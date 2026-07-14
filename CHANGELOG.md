@@ -4,6 +4,16 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.3.0 — 2026-07-14
+
+- **Write in-game spell sets**: a button next to "Memorize now" writes the
+  advisor's picks (priority order = gem order) straight into the game's
+  saved spell sets as "companion" — then one command in game loads the whole
+  bar: `/memspellset companion`. Existing sets are never touched and a
+  one-time backup of the file is kept. Note: the game reads this file at
+  login, so camp to character select and back before using the command.
+- Saved sets are readable via /api/spellsets with spell ids decoded to names.
+
 ## v1.2.0 — 2026-07-14
 
 - **Details-style damage meter overlay**: ranked class-colored bars over the
