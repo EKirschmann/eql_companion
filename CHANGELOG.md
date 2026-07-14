@@ -4,6 +4,12 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.4.2 — 2026-07-14
+
+- Collapsing the War Ledger in the normal layout now actually frees its
+  column (slim vertical strip, like the Atlas/Advisor one) instead of
+  leaving an empty panel.
+
 ## v1.4.1 — 2026-07-14
 
 - The HUD is locked to the viewport on desktop: tall panels (encounter,

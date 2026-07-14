@@ -468,7 +468,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.4.1"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.4.2"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)

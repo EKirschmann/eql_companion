@@ -1579,3 +1579,28 @@ button.app-version:hover { color: var(--gold-bright); }
   .hud-grid > .panel { overflow-y: auto; }
   .center-stack > .panel { min-height: 0; overflow-y: auto; }
 }
+
+/* collapsed ledger in NORMAL mode: shrink the whole grid column to a slim
+   vertical strip (combat mode keeps the horizontal bottom bar) */
+.hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) {
+  grid-template-columns: 320px minmax(380px, 1fr) 42px 300px;
+}
+@media (min-width: 1920px) {
+  .hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) {
+    grid-template-columns: 340px minmax(760px, 1fr) 42px 340px;
+  }
+}
+.hud-grid:not([data-combat]) .ledger-panel[data-collapsed] .panel-title {
+  writing-mode: vertical-rl;
+  height: 100%;
+  border-bottom: none;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 10px;
+}
+.hud-grid:not([data-combat]) .ledger-panel[data-collapsed] .ledger-filter {
+  display: none;
+}
+.hud-grid:not([data-combat]) .ledger-panel[data-collapsed] .ledger-collapse {
+  margin-left: 0;
+}
