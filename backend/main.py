@@ -627,13 +627,15 @@ async def update_check():
 
     def fetch():
         req = urllib.request.Request(
-            f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=1",
+            f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=30",
             headers={"User-Agent": "eql-companion", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
     try:
         tags = await asyncio.to_thread(fetch)
-        latest = (tags[0]["name"] if tags else "").lstrip("v") or None
+        # the tags API guarantees no ordering — take the semver max
+        names = [str(t.get("name", "")).lstrip("v") for t in tags]
+        latest = max((n for n in names if n), key=_parse_ver, default=None)
     except Exception as e:
         return {"current": APP_VERSION, "latest": None,
                 "error": f"could not reach GitHub ({type(e).__name__})"}
