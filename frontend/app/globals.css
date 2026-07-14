@@ -1568,3 +1568,14 @@ button.app-version:hover { color: var(--gold-bright); }
 .ledger-collapse:hover { color: var(--gold-bright); }
 .ledger-panel[data-collapsed] { max-height: none; }
 .hud-grid[data-combat] .ledger-panel[data-collapsed] { max-height: none; }
+
+/* viewport lock: the grid row never exceeds the screen — tall panels
+   (encounter, advisor) scroll internally, the atlas canvas flexes to fit */
+@media (min-width: 1200px) {
+  .hud { height: 100vh; }
+  .hud-grid { grid-template-rows: minmax(0, 1fr); }
+  .hud-grid[data-combat] { grid-template-rows: minmax(0, 1fr) auto; }
+  .hud-grid > * { min-height: 0; }
+  .hud-grid > .panel { overflow-y: auto; }
+  .center-stack > .panel { min-height: 0; overflow-y: auto; }
+}

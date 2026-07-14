@@ -4,6 +4,12 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.4.1 — 2026-07-14
+
+- The HUD is locked to the viewport on desktop: tall panels (encounter,
+  advisor) scroll internally instead of stretching every column below the
+  screen; the Atlas chart flexes to the available height.
+
 ## v1.4.0 — 2026-07-14
 
 - **Combat dashboard**: hide the Atlas/Advisor panel and the encounter view
