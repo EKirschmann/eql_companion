@@ -1582,13 +1582,27 @@ button.app-version:hover { color: var(--gold-bright); }
 
 /* collapsed ledger in NORMAL mode: shrink the whole grid column to a slim
    vertical strip (combat mode keeps the horizontal bottom bar) */
+/* the ledger's freed width goes to the ENCOUNTER panel, which reflows
+   into columns once it is wide enough */
 .hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) {
-  grid-template-columns: 320px minmax(380px, 1fr) 42px 300px;
+  grid-template-columns: 320px minmax(380px, 1fr) 42px minmax(560px, 640px);
 }
 @media (min-width: 1920px) {
   .hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) {
-    grid-template-columns: 340px minmax(760px, 1fr) 42px 340px;
+    grid-template-columns: 340px minmax(760px, 1fr) 42px minmax(640px, 760px);
   }
+}
+.hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) > .panel:last-child .panel-body {
+  column-width: 290px;
+  column-gap: 18px;
+}
+.hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) > .panel:last-child .enc-summary,
+.hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) > .panel:last-child .enc-agg {
+  break-inside: avoid;
+}
+.hud-grid:not([data-combat]):has(.ledger-panel[data-collapsed]) > .panel:last-child .enc-agg {
+  margin-top: 0;
+  padding-top: 14px;
 }
 .hud-grid:not([data-combat]) .ledger-panel[data-collapsed] .panel-title {
   writing-mode: vertical-rl;
