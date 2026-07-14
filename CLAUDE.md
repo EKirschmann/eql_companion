@@ -168,9 +168,11 @@ whenever the Inventory parse changes.
 - Gear is usable if ANY ONE of the trio can use it (`[USABLE]` pre-tags;
   wiki Race: lines are stale classic-era data and are stripped).
 - A 2H primary recommendation deterministically drops the secondary rec.
-- Exaltations parse from `<Loc>-SlotN` socket sub-rows with host tracking;
-  the model advises socket moves (socket-type rules are undocumented —
-  uncertainty is stated, not invented).
+- Exaltations parse from `<Loc>-SlotN` socket sub-rows with host tracking.
+  Sockets are TYPED — focus/clicky/worn/proc (taxonomy per
+  eqlegendstools.com); each stone's type is inferred from its base item's
+  Effect line, proc stones fit weapon sockets only, and moves are only
+  recommended between same-type sockets ("unknown" stays honest).
 
 ## LLM runtime (backend/llm_runtime.py)
 
@@ -191,6 +193,14 @@ whenever the Inventory parse changes.
 - Chat (agent/graph.py) uses the same `get_llm()` seam.
 
 ## Wiki grounding
+
+`builds_data.py` reads the eqlbuilds.com dataset snapshot that ships inside
+the MCP clone (dist/data/eqlbuilds — CI-refreshed): per-class spell lists
+with EXACT unlock levels, AA ranks/costs, skills. When present it feeds the
+advisor's spell/AA context directly (no scraping), backs `spell_record`
+when the MCP server can't answer, and decides pet-line supersession (pet
+SPAs 33/71 carry no magnitude — unlock level IS strength). No clone = every
+helper returns None and callers fall back.
 
 `mcp_client.py` prefers the EQL MCP server (structured `eql_builds_*`
 spells/AAs/skills/stances; clone of ArtSabintsev/everquest-legends-mcp,

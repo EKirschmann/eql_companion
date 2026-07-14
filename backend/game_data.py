@@ -22,6 +22,7 @@ from typing import List, Optional
 from backend.cache import wiki_page_cache
 from backend.config import settings
 from backend.map_system import _canonical
+from backend import builds_data
 from backend.mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,15 @@ async def spell_record(name: str) -> Optional[dict]:
     sc = await get_mcp_client().call_tool(
         "eql_builds_spell", {"idOrName": name.strip()})
     sp = (sc or {}).get("spell")
-    if sc is not None:  # server answered — cache even a miss
+    if sp is None and sc is None:
+        # MCP server absent: the local eqlbuilds snapshot carries the same
+        # record (effects, target, per-class levels) — synthesize from it
+        sp = builds_data.spell_entry(name)
+    if sp is not None and "levels" not in sp:
+        lv = builds_data.spell_levels(name)
+        if lv:
+            sp = {**sp, "levels": lv}
+    if sc is not None or sp is not None:
         wiki_page_cache.set(sp or {}, WIKI_TTL, "spell_record", key)
     return sp
 
@@ -129,6 +138,20 @@ async def is_travel_ritual(name: str) -> bool:
 
 
 RES_SPA = 81  # resurrect: returns a dead player to their corpse with xp
+# Pet summons (33 pet, 71 undead pet): every rank carries the same effect
+# magnitude, so strength lives ONLY in the unlock level — supersession for
+# these lines is decided by level (from the eqlbuilds snapshot).
+PET_SPAS = {33, 71}
+
+
+def _is_pet(rec: Optional[dict]) -> bool:
+    return any(e.get("effectId") in PET_SPAS
+               for e in (rec or {}).get("effects") or [])
+
+
+def _pet_unlock_level(name: str) -> Optional[int]:
+    lv = builds_data.spell_levels(name)
+    return min(lv.values()) if lv else None
 # Effects whose baseValue is an ID, not a magnitude — never comparable
 # ("Summon Drink supersedes Hammer of Striking" was a real bug: both are
 # SPA 32 and the summoned item id compared as if it were power).
@@ -157,6 +180,10 @@ async def supersedes_for_slots(using: str, upgrade: str) -> bool:
     rb = await spell_record(upgrade)
     ca = {str(x).lower() for x in (ra or {}).get("classes") or []}
     cb = {str(x).lower() for x in (rb or {}).get("classes") or []}
+    if _is_pet(ra) and _is_pet(rb):
+        # pet lines widen their class set as they rank up (Cavorting Bones
+        # is NEC-only, Leering Corpse NEC+SHK) — overlap is enough
+        return bool(ca & cb)
     return bool(ca) and ca == cb
 
 
@@ -189,6 +216,9 @@ async def same_spell_line(using: str, upgrade: str) -> bool:
         return False
     if ra.get("targetTypeId") != rb.get("targetTypeId"):
         return False
+    if _is_pet(ra) and _is_pet(rb):
+        la, lb = _pet_unlock_level(using), _pet_unlock_level(upgrade)
+        return la is not None and lb is not None and lb > la
     pa = _primary_effect(ra)
     pb = _primary_effect(rb)
     if not pa or not pb:
@@ -328,6 +358,11 @@ async def build_wiki_context(classes: List[str], level: Optional[int],
     parts: List[str] = []
 
     for cls in classes:
+        snap = builds_data.class_spell_lines(cls, lo, hi)
+        if snap:  # eqlbuilds snapshot: exact levels, no scraping
+            parts.append(f"## {cls} spells (window L{lo}-L{hi}, exact levels): "
+                         "Lnn name [mana] effect\n" + "\n".join(snap[:60]))
+            continue
         cached = wiki_page_cache.get("advisor_spells", cls, lo, hi)
         if cached is None:
             page = await mcp.wiki_page(cls)
@@ -347,17 +382,22 @@ async def build_wiki_context(classes: List[str], level: Optional[int],
         if sk:
             parts.append(f"## {cls} skill caps (weapon/combat training)" + chr(10) + sk)
 
-    key = "/".join(classes)
-    cached = wiki_page_cache.get("advisor_aas", key)
-    if cached is None:
-        page = await mcp.wiki_page(AA_PAGE)
-        if page is not None:
-            cached = "\n".join(compact_aas(page.get("text", ""), classes)[:160])
-            wiki_page_cache.set(cached, WIKI_TTL, "advisor_aas", key)
-        else:
-            cached = ""  # fetch failed -- do not cache, retry next consult
-    if cached:
-        parts.append("## AAs: [tab] name (ranks, cost per rank) effect\n" + cached)
+    aa_snap = builds_data.class_aa_lines(classes)
+    if aa_snap:  # snapshot: exact ranks + per-rank costs
+        parts.append("## AAs: [tab] name (ranks, cost per rank) effect\n"
+                     + "\n".join(aa_snap[:160]))
+    else:
+        key = "/".join(classes)
+        cached = wiki_page_cache.get("advisor_aas", key)
+        if cached is None:
+            page = await mcp.wiki_page(AA_PAGE)
+            if page is not None:
+                cached = "\n".join(compact_aas(page.get("text", ""), classes)[:160])
+                wiki_page_cache.set(cached, WIKI_TTL, "advisor_aas", key)
+            else:
+                cached = ""  # fetch failed -- do not cache, retry next consult
+        if cached:
+            parts.append("## AAs: [tab] name (ranks, cost per rank) effect\n" + cached)
 
     return "\n\n".join(parts)[:max_chars]
 

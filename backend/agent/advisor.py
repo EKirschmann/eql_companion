@@ -67,6 +67,7 @@ Rules:
   - should_have: fills the REMAINING slots, in priority order — must_have + should_have together must total EXACTLY __SLOTS_NOTE__ picks.
   - nice_to_have: 5-8 EXTRA alternatives beyond the slot count, in priority order, so the player can swap by situation (different zone, tougher pulls, low mana).
 - prebuffs: separate from the loadout — long-duration self-buffs worth keeping up (damage shields like Bramblecoat, AC/HP buffs, Spirit of Wolf). The player memorizes one temporarily, casts it, then swaps the slot back to combat spells — so do NOT waste loadout slots on long buffs; put them here. Owned and level-legal only.
+- Summoned-pet lines (skeletons, elementals, warders): only ever slot the HIGHEST-level pet the character owns — older ranks are strictly weaker versions of the same pet.
 - Respect the focus STRICTLY: for solo focuses, never slot group-only utility — resurrection and corpse-recovery lines, buffs that can only target others — those are dead slots when playing alone.
 - If a "Missing spells they could BUY" list is present, fold the best purchases into note or horizon (say they are vendor purchases).
 - replace: ONLY same-spell-line pairs — the upgrade must do the same job with the same primary effect (Symbol of Transal -> Symbol of Ryltan; Minor Healing -> Healing). A teleport, utility, or AA ability is NEVER upgraded by a nuke or an unrelated spell. Cover: recently-cast spells superseded by a better OWNED spell, and owned loadout spells with a significant same-line upgrade within 2 levels (say the level). Omit any pair you are not sure about; every pair is machine-verified and wrong ones are discarded.
@@ -680,7 +681,7 @@ __CONTEXT__
 OWNED EQUIPMENT (from /outputfile inventory; [worn/bags/bank] shows where each lives; stats and drop sources are from the game's wiki):
 __GEAR__
 
-EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets — socket-type compatibility rules are not fully documented, note uncertainty):
+EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
 __EXALTS__
 
 Reply with ONLY a JSON object (no fences, no prose):
@@ -698,6 +699,23 @@ Rules:
 - Weapons: consider the classes' usable weapon skills; for a Monk trio prefer fist/blunt options.
 - exaltations: review where each exaltation is socketed vs what it grants. Recommend moves ONLY when clearly better (an unused bank exaltation with a strong effect, or an effect wasted on unused gear); "move_to" = the item to socket it into. Skip trivial shuffles; note uncertainty about socket compatibility.
 """
+
+
+def _exalt_socket_type(effect: Optional[str]) -> str:
+    """focus / clicky / worn / proc from the wiki Effect line's wording.
+    Socket taxonomy per eqlegendstools.com."""
+    if not effect:
+        return "unknown"
+    low = effect.lower()
+    if "combat" in low or "proc" in low:
+        return "proc"
+    if "worn" in low:
+        return "worn"
+    if "focus" in low:
+        return "focus"
+    if "casting time" in low or "must equip" in low or "any slot" in low             or "triggered" in low:
+        return "clicky"
+    return "unknown"
 
 
 async def _exalt_effect(base_item: str) -> Optional[str]:
@@ -782,8 +800,13 @@ async def generate_gear_advice(ctx: dict) -> dict:
             eff = None
         host = (f"socketed in {x['host']} ({x['host_loc']})" if x.get("host")
                 else f"loose in the {x['where']}")
+        styp = _exalt_socket_type(eff)
+        fits = ("weapon sockets only (Primary/Secondary/Range)"
+                if styp == "proc" else f"{styp} sockets"
+                if styp != "unknown" else "unknown socket type")
         exalt_lines.append(f"{x['name']} — {host}"
-                           + (f" — grants {eff}" if eff else ""))
+                           + (f" — grants {eff}" if eff else "")
+                           + f" — type: {styp} (fits {fits})")
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 
