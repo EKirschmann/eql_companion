@@ -1448,3 +1448,19 @@ body {
   text-transform: none;
   color: var(--ink-dim, rgba(230, 222, 202, 0.55));
 }
+
+button.app-version {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+button.app-version:hover { color: var(--gold-bright); }
+.update-msg {
+  font-size: 0.78em;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  margin-left: 8px;
+}
+.update-msg[data-newer] { color: var(--gold-bright); }

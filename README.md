@@ -88,6 +88,12 @@ Open **http://localhost:3000**, then in game type:
 
 Then press **check exports** and **Consult** in the Advisor tab.
 
+## Updating
+
+Click the version badge in the app header to check for a newer release.
+To update: close the companion, run `update_companion.bat`, start it again.
+What changed is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Notes
 
 - Sessions survive backend restarts (state snapshots to `data/`)

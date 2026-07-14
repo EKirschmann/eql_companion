@@ -10,6 +10,7 @@ Run: uvicorn backend.main:app --reload
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -456,7 +457,8 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.0.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.1.0"  # bump together with frontend/lib/version.ts
+GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
 
@@ -611,6 +613,33 @@ async def get_encounters(limit: int = 50, db: Session = Depends(get_db)):
                     LogEventRow.event_type == "encounter")
             .order_by(LogEventRow.id.desc()).limit(limit).all())
     return {"encounters": [r.payload for r in rows]}
+
+
+def _parse_ver(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3]) or (0,)
+
+
+@app.get("/api/update-check")
+async def update_check():
+    """Compare the running version against the newest GitHub tag. On-demand
+    (the version badge in the header triggers it) — never automatic."""
+    import urllib.request
+
+    def fetch():
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=1",
+            headers={"User-Agent": "eql-companion", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    try:
+        tags = await asyncio.to_thread(fetch)
+        latest = (tags[0]["name"] if tags else "").lstrip("v") or None
+    except Exception as e:
+        return {"current": APP_VERSION, "latest": None,
+                "error": f"could not reach GitHub ({type(e).__name__})"}
+    newer = latest is not None and _parse_ver(latest) > _parse_ver(APP_VERSION)
+    return {"current": APP_VERSION, "latest": latest, "update_available": newer,
+            "how": "close the companion and run update_companion.bat" if newer else None}
 
 
 @app.get("/api/llm")

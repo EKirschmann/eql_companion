@@ -23,6 +23,23 @@ interface CharacterEntry {
 export default function Home() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [overlayOn, setOverlayOn] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<{ text: string; newer: boolean } | null>(null);
+
+  const checkUpdates = async () => {
+    setUpdateMsg({ text: "checking…", newer: false });
+    try {
+      const r = await apiGet<{ current: string; latest: string | null; update_available?: boolean; error?: string }>(
+        "/api/update-check",
+      );
+      if (r.error) setUpdateMsg({ text: r.error, newer: false });
+      else if (r.update_available)
+        setUpdateMsg({ text: `v${r.latest} available — close the app and run update_companion.bat`, newer: true });
+      else setUpdateMsg({ text: "up to date", newer: false });
+    } catch {
+      setUpdateMsg({ text: "backend offline", newer: false });
+    }
+    setTimeout(() => setUpdateMsg(null), 10000);
+  };
 
   useEffect(() => {
     apiGet<{ running: boolean }>("/api/overlay")
@@ -96,7 +113,20 @@ export default function Home() {
       <header className="hud-header">
         <div>
           <div className="eyebrow">
-            EQL Companion <span className="app-version">v{APP_VERSION}</span>
+            EQL Companion{" "}
+            <button
+              type="button"
+              className="app-version"
+              onClick={checkUpdates}
+              title="Check for updates (compares against the latest release on GitHub)"
+            >
+              v{APP_VERSION}
+            </button>
+            {updateMsg && (
+              <span className="update-msg" data-newer={updateMsg.newer ? "1" : undefined}>
+                {updateMsg.text}
+              </span>
+            )}
           </div>
           <h1 className="nameplate">{snap?.name ?? "—"}</h1>
           <div className="nameplate-sub">

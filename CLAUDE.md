@@ -258,6 +258,14 @@ model selection itself is runtime-switchable in the UI.
 - Chat-agent suggestion tools still use placeholder data; the Advisor tab
   is the fully grounded path.
 
+## Releasing
+
+Bump `APP_VERSION` in backend/main.py AND frontend/lib/version.ts (same
+string), add a CHANGELOG.md section, commit, then `git tag vX.Y.Z` and push
+with `--tags`. The in-app update check compares the running version against
+the newest GitHub tag, and users update via update_companion.bat (git pull
++ dependency refresh) — untagged pushes are invisible to the checker.
+
 ## Notes for assistants
 
 - Git: never commit `.env` (real keys) or `data/` (runtime state) — both
