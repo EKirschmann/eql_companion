@@ -168,3 +168,11 @@ def spell_name(sid: int) -> Optional[str]:
                               for c in d.values()
                               for s in c.get("spellList") or []}
     return _cache["id_index"].get(sid)
+
+
+def spell_duration_ticks(name: str) -> Optional[int]:
+    """durationTicks from the snapshot. In EQL, a BENEFICIAL buff with 0
+    ticks is permanent-until-death (Instrument of Nife, Greater Wolf Form);
+    timed buffs carry real ticks (Spirit of Wolf = 360)."""
+    e = spell_entry(name)
+    return None if e is None else (e.get("durationTicks") or 0)

@@ -457,7 +457,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.3.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.3.1"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -609,13 +609,23 @@ async def generate_spellset(body: dict | None = None):
     One command in game then loads the whole bar: /memspellset <name>."""
     from backend import builds_data
     from backend.spellsets import find_loadout_ini, write_spell_set
-    name = ((body or {}).get("name") or "companion").strip()[:24]
+    source = ((body or {}).get("source") or "loadout").strip()
+    default_name = "prebuffs" if source == "prebuffs" else "companion"
+    name = ((body or {}).get("name") or default_name).strip()[:24]
     if _advice_cache is None:
         raise HTTPException(400, "no counsel cached — press Consult first")
-    picks = ((_advice_cache.get("must_have") or [])
-             + (_advice_cache.get("should_have") or []))
-    if not picks:
-        raise HTTPException(400, "the cached counsel has no loadout picks")
+    if source == "prebuffs":
+        picks = list(_advice_cache.get("prebuffs") or [])
+        # permanent buffs first: cast once, they persist until death
+        picks.sort(key=lambda p: (builds_data.spell_duration_ticks(
+            p.get("name")) or 0) != 0)
+        if not picks:
+            raise HTTPException(400, "the cached counsel has no pre-buffs")
+    else:
+        picks = ((_advice_cache.get("must_have") or [])
+                 + (_advice_cache.get("should_have") or []))
+        if not picks:
+            raise HTTPException(400, "the cached counsel has no loadout picks")
     path = find_loadout_ini(tracker.name, tracker.server)
     if not path:
         raise HTTPException(404, "no LO*.ini found in the game folder")

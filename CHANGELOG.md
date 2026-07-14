@@ -4,6 +4,16 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.3.1 — 2026-07-14
+
+- **Pre-buff spell set**: a second write button on the Pre-buffs section
+  creates a "prebuffs" in-game set (permanent buffs first) — /memspellset
+  prebuffs, buff up, then /memspellset companion for combat.
+- **The advisor now knows which buffs are permanent** (self-target,
+  zero-duration in the spell data — Instrument of Nife, Shielding line,
+  Banshee Aura…) and is instructed never to suggest "refreshing" them.
+- Spell-set write confirmations stay on screen until the next consult.
+
 ## v1.3.0 — 2026-07-14
 
 - **Write in-game spell sets**: a button next to "Memorize now" writes the

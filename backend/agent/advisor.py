@@ -66,7 +66,7 @@ Rules:
   - must_have: the core spells that should always be memorized, in priority order (typically 5-7).
   - should_have: fills the REMAINING slots, in priority order — must_have + should_have together must total EXACTLY __SLOTS_NOTE__ picks.
   - nice_to_have: 5-8 EXTRA alternatives beyond the slot count, in priority order, so the player can swap by situation (different zone, tougher pulls, low mana).
-- prebuffs: separate from the loadout — long-duration self-buffs worth keeping up (damage shields like Bramblecoat, AC/HP buffs, Spirit of Wolf). The player memorizes one temporarily, casts it, then swaps the slot back to combat spells — so do NOT waste loadout slots on long buffs; put them here. Owned and level-legal only.
+- prebuffs: separate from the loadout — list PERMANENT buffs (marked in the character data) FIRST: they persist until death, are cast exactly once, and must never be described as needing refreshing. Then long-duration self-buffs worth keeping up (damage shields like Bramblecoat, AC/HP buffs, Spirit of Wolf). The player memorizes one temporarily, casts it, then swaps the slot back to combat spells — so do NOT waste loadout slots on long buffs; put them here. Owned and level-legal only.
 - Summoned-pet lines (skeletons, elementals, warders): only ever slot the HIGHEST-level pet the character owns — older ranks are strictly weaker versions of the same pet.
 - Respect the focus STRICTLY: for solo focuses, never slot group-only utility — resurrection and corpse-recovery lines, buffs that can only target others — those are dead slots when playing alone.
 - If a "Missing spells they could BUY" list is present, fold the best purchases into note or horizon (say they are vendor purchases).
@@ -117,6 +117,11 @@ def _build_prompt(ctx: dict, wiki: str) -> str:
     casts = ctx.get("recent_casts") or []
     lines.append("- Recently cast (live log, newest first): "
                  + (", ".join(casts) if casts else "none seen"))
+    perm = ctx.get("_permanent") or []
+    if perm:
+        lines.append("- PERMANENT buffs owned (last until death — cast ONCE "
+                     "after login/death, NEVER tell the user to refresh them, "
+                     "never spend a combat slot on them): " + ", ".join(perm))
     hunt = ctx.get("_hunting") or []
     if hunt:
         at_lv = [c for c in hunt if c.get("at_level")]
@@ -223,6 +228,36 @@ def _fallback_body(ctx: dict, reason: str) -> dict:
         "aa_now": [{"name": a["name"], "cost": None, "reason": a["desc"]} for a in aas],
         "aa_save": [], "horizon": [], "locations": [], "class_notes": [],
     }
+
+
+# self-buffs that are NOT persistent states: travel (26/83/88/104), item
+# summons (32), pets (33/71), feign death (74), resurrection (81)
+_NOT_PERM_SPAS = {26, 32, 33, 71, 74, 81, 83, 88, 104}
+_SELF_TARGET = 6
+
+
+def _permanent_buffs(ctx: dict) -> List[str]:
+    """Owned usable spells that are permanent-until-death self-buffs:
+    self-target + zero duration ticks in the eqlbuilds snapshot (verified:
+    Instrument of Nife, Greater Wolf Form, Bramblecoat all match; timed
+    buffs like Spirit of Wolf carry real ticks; enemy utility like Stun is
+    excluded by target type). Damage shields have negative bases, so no
+    positivity requirement."""
+    from backend import builds_data
+    from backend.game_data import _primary_effect
+    level = ctx.get("level")
+    out = []
+    for s in (ctx.get("spellbook") or {}).get("castable", []):
+        if level is not None and s["level"] > level:
+            continue
+        e = builds_data.spell_entry(s["name"])
+        if (not e or (e.get("durationTicks") or 0) != 0
+                or e.get("targetTypeId") != _SELF_TARGET):
+            continue
+        pe = _primary_effect(e)
+        if pe and pe[0] not in _NOT_PERM_SPAS:
+            out.append(s["name"])
+    return out
 
 
 def _gate_locations(locs: List[dict], hunt: List[dict]) -> List[dict]:
@@ -498,6 +533,7 @@ async def generate_advice(ctx: dict) -> dict:
                                if ctx.get("level") else [])
         except Exception:
             ctx["_hunting"] = []
+        ctx["_permanent"] = _permanent_buffs(ctx)
         if llm_active()["provider"] == "none":
             body = await _builtin_counsel(ctx)
             base["grounding"] = body.pop("grounding", "memory")

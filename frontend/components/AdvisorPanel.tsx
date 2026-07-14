@@ -95,10 +95,10 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   const [llmModelDraft, setLlmModelDraft] = useState("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const flashScanResult = (text: string, ok: boolean) => {
+  const flashScanResult = (text: string, ok: boolean, sticky = false) => {
     setScanResult({ text, ok });
     if (scanTimer.current) clearTimeout(scanTimer.current);
-    scanTimer.current = setTimeout(() => setScanResult(null), 8000);
+    if (!sticky) scanTimer.current = setTimeout(() => setScanResult(null), 8000);
   };
   useEffect(() => () => {
     if (scanTimer.current) clearTimeout(scanTimer.current);
@@ -176,20 +176,21 @@ export const AdvisorPanel = memo(function AdvisorPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const writeSpellSet = async () => {
+  const writeSpellSet = async (source: "loadout" | "prebuffs") => {
     try {
       const r = await apiSend<{ name: string; count: number; memspellset: string; skipped: string[]; note: string }>(
         "/api/spellsets/generate",
-        {},
+        { source },
       );
       flashScanResult(
         `set "${r.name}" written (${r.count} spells) — in game: ${r.memspellset}` +
           (r.skipped.length ? ` · no id for: ${r.skipped.join(", ")}` : "") +
           ` · ${r.note}`,
         true,
+        true,
       );
     } catch (e) {
-      flashScanResult(`spell-set write failed: ${e instanceof Error ? e.message : "backend error"}`, false);
+      flashScanResult(`spell-set write failed: ${e instanceof Error ? e.message : "backend error"}`, false, true);
     }
   };
 
@@ -225,6 +226,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   const consult = useCallback(async (refresh: boolean) => {
     setLoading(true);
     setError(null);
+    setScanResult(null); // sticky spell-set notes live until the next consult
     try {
       setAdvice(await apiGet<Advice>(`/api/advisor${refresh ? "?refresh=1" : ""}`));
     } catch {
@@ -458,7 +460,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   <button
                     type="button"
                     className="adv-rescan adv-gear-btn"
-                    onClick={writeSpellSet}
+                    onClick={() => writeSpellSet("loadout")}
                     title={'Write these picks as an in-game spell set ("companion") — then /memspellset companion loads the whole bar'}
                   >
                     write in-game spell set
@@ -501,7 +503,17 @@ export const AdvisorPanel = memo(function AdvisorPanel({
 
             {advice.prebuffs.length > 0 && (
               <div className="adv-section">
-                <h3>Pre-buffs — cast, then swap the slot</h3>
+                <h3>
+                  Pre-buffs — cast, then swap the slot
+                  <button
+                    type="button"
+                    className="adv-rescan adv-gear-btn"
+                    onClick={() => writeSpellSet("prebuffs")}
+                    title={'Write the pre-buffs as an in-game spell set ("prebuffs", permanent buffs first) — /memspellset prebuffs, buff up, then /memspellset companion for combat'}
+                  >
+                    write pre-buff set
+                  </button>
+                </h3>
                 <ul className="adv-list">
                   {advice.prebuffs.map((s) => (
                     <li key={`${s.cls}-${s.name}`}>
