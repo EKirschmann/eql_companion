@@ -4,6 +4,24 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.4.0 — 2026-07-14
+
+- **Combat dashboard**: hide the Atlas/Advisor panel and the encounter view
+  reflows into side-by-side columns across the freed width; the War Ledger
+  becomes a short strip and can collapse entirely; encounter text size is
+  adjustable (A− / A+); the Companion chat tab is gone
+- **Defense stats**: every fight now shows the tanking line — avoided %
+  with dodge / parry / block / riposte / miss counts
+- **Spell sets**: gems auto-ordered (DD, DoTs, AoE, heals from gem 8,
+  utility, pets); pick-and-choose checkboxes (max 14) with a bigger,
+  auto-backfilled nice-to-have list; the pre-buff set fills to 14 with
+  permanents first then longest-duration buffs
+- **Vendor shopping list**: near-level missing spells worth buying, marked
+  "buy ahead" when above your level (spells scribe early)
+- Loot lines that auto-sold show "(sold)"; loadout-change warnings no longer
+  misfire on travel rituals or exaltation-granted casts; the overlay closes
+  with the game and never doubles
+
 ## v1.3.1 — 2026-07-14
 
 - **Pre-buff spell set**: a second write button on the Pre-buffs section

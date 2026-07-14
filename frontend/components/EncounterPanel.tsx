@@ -74,11 +74,27 @@ export const EncounterPanel = memo(function EncounterPanel({
 
   const foes = enc?.foes ?? [];
   const slain = foes.filter((f) => f.slain).length;
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const s = parseFloat(localStorage.getItem("eql.encScale") ?? "1");
+    if (s >= 0.8 && s <= 1.6) setScale(s);
+  }, []);
+  const bumpScale = (d: number) => {
+    setScale((v) => {
+      const n = Math.min(1.6, Math.max(0.8, Math.round((v + d) * 20) / 20));
+      localStorage.setItem("eql.encScale", String(n));
+      return n;
+    });
+  };
 
   return (
     <section className="panel">
       <div className="panel-title">
         Encounter
+        <span className="font-scale" aria-label="Encounter text size">
+          <button type="button" onClick={() => bumpScale(-0.1)} title="Smaller text">A−</button>
+          <button type="button" onClick={() => bumpScale(0.1)} title="Larger text">A+</button>
+        </span>
         {enc && (
           <span className="enc-nav">
             <button type="button" onClick={() => step(1)}
@@ -96,7 +112,7 @@ export const EncounterPanel = memo(function EncounterPanel({
           </span>
         )}
       </div>
-      <div className="panel-body">
+      <div className="panel-body" style={{ zoom: scale }}>
         {!enc ? (
           <p className="chat-empty">
             No encounter yet. The breakdown appears when you enter combat, and
@@ -117,6 +133,22 @@ export const EncounterPanel = memo(function EncounterPanel({
               {enc.damage_taken > 0 && (
                 <div className="enc-taken">{fmt(enc.damage_taken)} taken</div>
               )}
+              {(() => {
+                const d = enc.defense ?? {};
+                const avoided = Object.values(d).reduce((a, b) => a + b, 0);
+                const attacks = avoided + (enc.in_hits ?? 0);
+                if (!attacks) return null;
+                const parts = ["dodge", "parry", "block", "riposte", "miss"]
+                  .filter((k) => d[k])
+                  .map((k) => `${k} ${d[k]}`)
+                  .join(" · ");
+                return (
+                  <div className="enc-defense">
+                    defense {Math.round((100 * avoided) / attacks)}% —{" "}
+                    {parts || "none"} <span className="adv-cls">of {attacks} attacks</span>
+                  </div>
+                );
+              })()}
               {foes.length > 1 && (
                 <ul className="enc-foes" aria-label="Foes in this encounter">
                   {foes.map((f) => (

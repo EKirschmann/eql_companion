@@ -91,6 +91,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   const [checking, setChecking] = useState(false);
   const [scanResult, setScanResult] = useState<{ text: string; ok: boolean } | null>(null);
   const [hunting, setHunting] = useState<HuntingData | null>(null);
+  const [pickSel, setPickSel] = useState<Record<string, boolean>>({});
   const [llm, setLlm] = useState<LlmInfo | null>(null);
   const [llmModelDraft, setLlmModelDraft] = useState("");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -177,10 +178,16 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   }, []);
 
   const writeSpellSet = async (source: "loadout" | "prebuffs") => {
+    const names =
+      source === "loadout" && advice
+        ? [...advice.must_have, ...advice.should_have, ...advice.nice_to_have]
+            .filter((s) => pickSel[s.name])
+            .map((s) => s.name)
+        : undefined;
     try {
       const r = await apiSend<{ name: string; count: number; memspellset: string; skipped: string[]; note: string }>(
         "/api/spellsets/generate",
-        { source },
+        { source, names },
       );
       flashScanResult(
         `set "${r.name}" written (${r.count} spells) — in game: ${r.memspellset}` +
@@ -193,6 +200,15 @@ export const AdvisorPanel = memo(function AdvisorPanel({
       flashScanResult(`spell-set write failed: ${e instanceof Error ? e.message : "backend error"}`, false, true);
     }
   };
+
+  useEffect(() => {
+    if (!advice) return;
+    const sel: Record<string, boolean> = {};
+    advice.must_have.forEach((s) => { sel[s.name] = true; });
+    advice.should_have.forEach((s) => { sel[s.name] = true; });
+    advice.nice_to_have.forEach((s) => { sel[s.name] = sel[s.name] ?? false; });
+    setPickSel(sel);
+  }, [advice]);
 
   const consultGear = async (refresh: boolean) => {
     setGearLoading(true);
@@ -465,6 +481,9 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   >
                     write in-game spell set
                   </button>
+                  <span className="adv-pick-count">
+                    {Object.values(pickSel).filter(Boolean).length}/14 picked · gems auto-ordered: DD, DoT, AoE, heals@8, utility, pets
+                  </span>
                 </h3>
                 {([
                   ["Must have", advice.must_have, 0],
@@ -480,6 +499,24 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                           <tbody>
                             {list.map((s, i) => (
                               <tr key={`${s.cls}-${s.name}`}>
+                                <td className="adv-pick">
+                                  <input
+                                    type="checkbox"
+                                    checked={pickSel[s.name] ?? false}
+                                    disabled={
+                                      !(pickSel[s.name] ?? false) &&
+                                      Object.values(pickSel).filter(Boolean).length >= 14
+                                    }
+                                    onChange={(e) =>
+                                      setPickSel((p) => {
+                                        const picked = Object.values(p).filter(Boolean).length;
+                                        if (e.target.checked && picked >= 14) return p;
+                                        return { ...p, [s.name]: e.target.checked };
+                                      })
+                                    }
+                                    title="Include in the written spell set (max 14)"
+                                  />
+                                </td>
                                 <td className="adv-pri">
                                   {offset >= 0 ? offset + i + 1 : `·`}
                                 </td>
@@ -540,6 +577,21 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {(advice.purchase?.length ?? 0) > 0 && (
+              <div className="adv-section">
+                <h3>Vendor shopping list</h3>
+                <p className="adv-purchase">
+                  {advice.purchase!
+                    .map((p) => `${p.name} (L${p.level}${p.now ? "" : " — buy ahead"})`)
+                    .join(" · ")}
+                </p>
+                <p className="adv-purchase-note">
+                  Missing from your spellbook — spells can be bought and scribed
+                  before you reach their level.
+                </p>
               </div>
             )}
 

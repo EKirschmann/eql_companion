@@ -65,7 +65,7 @@ Rules:
 - The loadout is tiered and must USE ALL __SLOTS_NOTE__ slots. Choose ONLY from the "Spellbook USABLE NOW" list (owned AND at or below the character's level). Name the job each pick does. Never pick a spell superseded by another owned spell.
   - must_have: the core spells that should always be memorized, in priority order (typically 5-7).
   - should_have: fills the REMAINING slots, in priority order — must_have + should_have together must total EXACTLY __SLOTS_NOTE__ picks.
-  - nice_to_have: 5-8 EXTRA alternatives beyond the slot count, in priority order, so the player can swap by situation (different zone, tougher pulls, low mana).
+  - nice_to_have: 10-14 EXTRA alternatives beyond the slot count, in priority order, so the player can swap by situation (different zone, tougher pulls, low mana).
 - prebuffs: separate from the loadout — list PERMANENT buffs (marked in the character data) FIRST: they persist until death, are cast exactly once, and must never be described as needing refreshing. Then long-duration self-buffs worth keeping up (damage shields like Bramblecoat, AC/HP buffs, Spirit of Wolf). The player memorizes one temporarily, casts it, then swaps the slot back to combat spells — so do NOT waste loadout slots on long buffs; put them here. Owned and level-legal only.
 - Summoned-pet lines (skeletons, elementals, warders): only ever slot the HIGHEST-level pet the character owns — older ranks are strictly weaker versions of the same pet.
 - Respect the focus STRICTLY: for solo focuses, never slot group-only utility — resurrection and corpse-recovery lines, buffs that can only target others — those are dead slots when playing alone.
@@ -257,6 +257,83 @@ def _permanent_buffs(ctx: dict) -> List[str]:
         pe = _primary_effect(e)
         if pe and pe[0] not in _NOT_PERM_SPAS:
             out.append(s["name"])
+    return out
+
+
+# gem-order stack for generated spell sets: direct damage, DoTs, AoE up
+# front; heals pinned to gem 8+; utility, then summons and pet utility last
+_AE_TARGETS = {4, 8}          # point-blank / targeted AE
+_PET_TARGET = 14
+_GEM_STACK = ("dd", "dot", "aoe", "heal", "utility", "summon", "summon_util")
+
+
+def _gem_category(name: str) -> str:
+    from backend import builds_data
+    from backend.game_data import _primary_effect
+    e = builds_data.spell_entry(name)
+    if not e:
+        return "utility"
+    pe = _primary_effect(e)
+    tgt = e.get("targetTypeId")
+    ticks = e.get("durationTicks") or 0
+    spa, basev = (pe[0], pe[1] or 0) if pe else (None, 0)
+    if spa in (33, 71):
+        return "summon"
+    if spa == 32 or tgt == _PET_TARGET:
+        return "summon_util"
+    if tgt in _AE_TARGETS:
+        return "aoe"
+    if spa == 0 and basev < 0:
+        return "dot" if ticks > 0 else "dd"
+    if spa == 0 and basev >= 0 and tgt == 51:
+        return "heal"
+    return "utility"
+
+
+def stack_gem_order(names: List[str]) -> List[str]:
+    """Order picks for the in-game set: DD, DoT, AoE from gem 1; healing
+    starting gem 8 where possible; then utility, summons, summon utility."""
+    cats = {n: _gem_category(n) for n in names}
+
+    def bucket(*cs):
+        return [n for n in names if cats[n] in cs]
+
+    offense = bucket("dd") + bucket("dot") + bucket("aoe")
+    heals = bucket("heal")
+    tail = bucket("utility") + bucket("summon") + bucket("summon_util")
+    slots = offense[:7]
+    spill = offense[7:]
+    while len(slots) < 7 and heals and tail:
+        slots.append(tail.pop(0))  # keep heals at gem 8 when there is filler
+    return (slots + heals + spill + tail)[:14]
+
+
+async def _extra_alternatives(ctx: dict, exclude: set, want: int) -> List[dict]:
+    """Deterministic nice-to-have backfill: highest-level owned usable spells
+    not already picked — travel/res/superseded-by-owned dropped. Guarantees
+    the player has swap options even when the LLM lists few."""
+    level = ctx.get("level")
+    solo = (ctx.get("playstyle") or "").startswith("solo")
+    book = ctx.get("spellbook") or {}
+    usable = [s for s in book.get("castable", [])
+              if (level is None or s["level"] <= level)
+              and s["name"] not in exclude]
+    names = [s["name"] for s in usable]
+    out = []
+    for s in sorted(usable, key=lambda x: -x["level"]):
+        if len(out) >= want:
+            break
+        n = s["name"]
+        try:
+            if await is_travel_ritual(n) or (solo and await is_resurrection(n)):
+                continue
+            if any(await supersedes_for_slots(n, o) for o in names if o != n):
+                continue
+        except Exception:
+            continue
+        cat, _ = await _spell_cat(n)
+        out.append({"name": n, "cls": "", "level": s["level"],
+                    "reason": f"owned {cat} alternative (auto-added)"})
     return out
 
 
@@ -453,7 +530,7 @@ async def _compose_builtin(ctx, bycat, replaced, grounded_any,
         "note": BUILTIN_NOTE,
         "loadout": (must + should)[:slots],
         "must_have": must, "should_have": should,
-        "nice_to_have": nice[:8], "prebuffs": prebuffs,
+        "nice_to_have": nice[:12], "prebuffs": prebuffs,
         "replace": replaced[:6],
         "aa_now": aa_now, "aa_save": aa_save,
         "horizon": horizon[:8], "locations": locations,
@@ -635,7 +712,7 @@ async def generate_advice(ctx: dict) -> dict:
             _clean_list(data.get("should_have"), ("name", "cls", "reason"), cap=14),
             "should_have")
         nice_to_have = await _gate_picks(
-            _clean_list(data.get("nice_to_have"), ("name", "cls", "reason"), cap=10),
+            _clean_list(data.get("nice_to_have"), ("name", "cls", "reason"), cap=16),
             "nice_to_have")
         # auto-promote: gates may have removed picks — refill the slots from
         # the nice-to-have alternatives (they passed the same gates)
@@ -673,6 +750,11 @@ async def generate_advice(ctx: dict) -> dict:
                                 p.get("using"), p.get("upgrade"))
             except Exception:
                 pass  # verification unavailable — drop rather than mislead
+        if len(nice_to_have) < 12:
+            picked = {p.get("name") for p in
+                      must_have + should_have + nice_to_have + prebuffs}
+            nice_to_have = nice_to_have + await _extra_alternatives(
+                ctx, picked, 12 - len(nice_to_have))
         return {
             **base, "source": "llm",
             "note": data.get("note"),

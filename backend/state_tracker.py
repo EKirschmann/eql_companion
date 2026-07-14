@@ -231,7 +231,15 @@ class CharacterTracker:
                 self.damage_taken += e.damage
                 self._touch_encounter(e.ts)
                 self.encounter["total_in"] += e.damage
+                self.encounter["in_hits"] = self.encounter.get("in_hits", 0) + 1
                 self._encounter_foe(e.attacker, taken=e.damage)
+            elif isinstance(e, ev.MissIn):
+                # tanking view: which defense ate each incoming swing
+                enc = self.encounter
+                if (enc is not None and
+                        (e.ts - enc["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS):
+                    d = enc.setdefault("defense", {})
+                    d[e.defense] = d.get(e.defense, 0) + 1
             elif isinstance(e, ev.HealReceived):
                 self.healing_received += e.amount
             elif isinstance(e, ev.HealOut):
@@ -272,6 +280,8 @@ class CharacterTracker:
                 self.skill_ups += 1
             elif isinstance(e, ev.Loot):
                 label = f"{e.item} → {e.upgraded_to}" if e.upgraded_to else e.item
+                if e.sold:
+                    label += " (sold)"
                 self.loots.appendleft(label)
                 # loot lines name the corpse: exact per-mob attribution
                 if e.source and "'s corpse" in e.source:
@@ -355,6 +365,8 @@ class CharacterTracker:
             "duration": round(duration, 1),
             "total_damage": enc["total_out"],
             "damage_taken": enc["total_in"],
+            "in_hits": enc.get("in_hits", 0),
+            "defense": dict(enc.get("defense") or {}),
             "dps": round(enc["total_out"] / duration, 1),
             "abilities": abilities,
         }

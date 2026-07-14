@@ -228,6 +228,17 @@ async def _check_cast(spell: str) -> None:
         classes = [c.strip() for c in (tracker.class_str or "").split("/") if c.strip()]
         if not classes:
             return
+        from backend.game_data import is_travel_ritual
+        if await is_travel_ritual(spell):
+            return  # rituals (rings/circles/gate...) are castable by ANY
+                    # class once learned — never a loadout signal
+        book = load_spellbook(tracker.name, tracker.server)
+        if book:
+            scribed = ({s["name"] for s in book.get("castable", [])}
+                       | set(book.get("other_loadouts") or []))
+            if spell not in scribed:
+                return  # not in the spellbook at all: an item/exaltation
+                        # clicky casting someone else's spell, not a swap
         castable_by = await spell_classes(spell)
         if not castable_by or castable_by & set(classes):
             return  # trio can cast it, or we cannot judge (no page / wiki down)
@@ -457,7 +468,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.3.1"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.4.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -609,21 +620,81 @@ async def generate_spellset(body: dict | None = None):
     One command in game then loads the whole bar: /memspellset <name>."""
     from backend import builds_data
     from backend.spellsets import find_loadout_ini, write_spell_set
+    from backend.agent.advisor import _permanent_buffs, stack_gem_order
+    from backend.game_data import _primary_effect as game_data_primary
+    from backend.game_data import supersedes_for_slots
     source = ((body or {}).get("source") or "loadout").strip()
     default_name = "prebuffs" if source == "prebuffs" else "companion"
     name = ((body or {}).get("name") or default_name).strip()[:24]
     if _advice_cache is None:
         raise HTTPException(400, "no counsel cached — press Consult first")
+    chosen = (body or {}).get("names")  # webapp checkbox selection
     if source == "prebuffs":
-        picks = list(_advice_cache.get("prebuffs") or [])
-        # permanent buffs first: cast once, they persist until death
-        picks.sort(key=lambda p: (builds_data.spell_duration_ticks(
-            p.get("name")) or 0) != 0)
+        # counsel picks + every owned permanent self-buff + timed buffs of
+        # 20min or longer (Spirit Armor / Regeneration class) — dedupe, with
+        # permanents first, then longest duration
+        book = load_spellbook(tracker.name, tracker.server) or {}
+        ctx_b = {"spellbook": book, "level": tracker.level}
+        perm = _permanent_buffs(ctx_b)
+        timed = []
+        for s in book.get("castable", []):
+            if tracker.level is not None and s["level"] > tracker.level:
+                continue
+            e = builds_data.spell_entry(s["name"])
+            if not e or e.get("targetTypeId") not in (6, 51):
+                continue  # beneficial self/ally only — no charms, no enemy DoTs
+            pe = game_data_primary(e)
+            if pe and pe[0] in (12, 13, 28):
+                continue  # invisibility lines (incl. IVU): situational
+            t = e.get("durationTicks") or 0
+            if t > 0:  # any timed buff — longest first fills toward 14
+                timed.append((t, s["name"]))
+        timed.sort(reverse=True)
+        llm_extra = [p.get("name") for p in _advice_cache.get("prebuffs") or []]
+        ordered, seen = [], set()
+        for n in perm + [n for _, n in timed] + llm_extra:
+            if n and n not in seen:
+                seen.add(n)
+                ordered.append(n)
+        # rank-family dedupe: Minor/Lesser/Greater prefixes and roman-numeral
+        # suffixes are ranks of one line — keep the highest-level owned one.
+        # (Effect comparison can't do this: the line's PRIMARY effect changes
+        # between ranks, e.g. Minor Shielding leads with AC, Shielding with HP.)
+        def rank_base(n: str) -> str:
+            words = n.lower().split()
+            while words and words[0] in ("minor", "lesser", "greater", "major"):
+                words = words[1:]
+            while words and words[-1] in ("i", "ii", "iii", "iv", "v"):
+                words = words[:-1]
+            return " ".join(words)
+
+        lvl_of = {s["name"]: s["level"] for s in book.get("castable", [])}
+        best: dict = {}
+        for n in ordered:
+            k = rank_base(n)
+            if k not in best or (lvl_of.get(n, 0) > lvl_of.get(best[k], 0)):
+                best[k] = n
+        kept = [n for n in ordered if best.get(rank_base(n)) == n]
+        # plus the effect-based gate for cross-name lines (Lesser Shielding
+        # would also fall here when class sets align)
+        picks = []
+        for n in kept:
+            superseded = False
+            for other in kept:
+                if other != n and await supersedes_for_slots(n, other):
+                    superseded = True
+                    break
+            if not superseded:
+                picks.append({"name": n})
         if not picks:
-            raise HTTPException(400, "the cached counsel has no pre-buffs")
+            raise HTTPException(400, "no pre-buffs found (spellbook export missing?)")
+    elif chosen:
+        picks = [{"name": n} for n in stack_gem_order([str(x) for x in chosen])]
     else:
-        picks = ((_advice_cache.get("must_have") or [])
-                 + (_advice_cache.get("should_have") or []))
+        names = [p.get("name") for p in
+                 ((_advice_cache.get("must_have") or [])
+                  + (_advice_cache.get("should_have") or []))]
+        picks = [{"name": n} for n in stack_gem_order([n for n in names if n])]
         if not picks:
             raise HTTPException(400, "the cached counsel has no loadout picks")
     path = find_loadout_ini(tracker.name, tracker.server)
@@ -631,6 +702,8 @@ async def generate_spellset(body: dict | None = None):
         raise HTTPException(404, "no LO*.ini found in the game folder")
     ids, written, skipped = [], [], []
     for pck in picks:
+        if len(ids) >= 14:
+            break
         sid = builds_data.spell_id(pck.get("name"))
         if sid is None:
             skipped.append(pck.get("name"))
@@ -797,6 +870,16 @@ async def get_advisor(refresh: bool = False, cached: bool = False):
         ctx["missing_spells"] = [
             s for s in miss["castable"] if s["level"] <= tracker.level + 3][:25]
     advice = await generate_advice(ctx)
+    # deterministic vendor list: missing spells are buyable (and scribable)
+    # BEFORE their level — compact reminder, not LLM-generated
+    lvl = tracker.level
+    advice["purchase"] = sorted(
+        ({"name": s["name"], "level": s["level"],
+          "now": lvl is None or s["level"] <= lvl}
+         for s in ctx.get("missing_spells") or []
+         # near-level window only: low-level leftovers were skipped on purpose
+         if lvl is None or s["level"] >= lvl - 2),
+        key=lambda x: -x["level"])[:8]
     _advice_cache, _advice_sig = advice, sig
     _save_advice_cache()
     return advice

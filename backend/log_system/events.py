@@ -154,10 +154,11 @@ class OtherDamageOut(LogEvent):
 
 
 class MissIn(LogEvent):
-    """<attacker> tries to <verb> YOU, but misses!"""
+    """<attacker> tries to <verb> YOU, but misses / YOU block|dodge|...!"""
     type: str = "miss_in"
     attacker: str
     verb: str
+    defense: str = "miss"      # miss | dodge | parry | block | riposte
 
 
 class Coin(LogEvent):
@@ -194,6 +195,8 @@ class Loot(LogEvent):
     item: str
     source: Optional[str] = None       # "the thaumaturgist's corpse"
     upgraded_to: Optional[str] = None  # EQL upgrade system: "... to create X +3"
+    sold: bool = False                 # loot-and-auto-sell variant
+    sold_for: Optional[str] = None     # "4 platinum, 2 gold, 1 silver"
 
 
 class BuffFade(LogEvent):

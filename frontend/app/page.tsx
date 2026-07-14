@@ -8,7 +8,6 @@ import { APP_VERSION } from "@/lib/version";
 import { AdvisorPanel } from "@/components/AdvisorPanel";
 import { AtlasPanel } from "@/components/AtlasPanel";
 import { CharacterPanel } from "@/components/CharacterPanel";
-import { CompanionPanel } from "@/components/CompanionPanel";
 import { EncounterPanel } from "@/components/EncounterPanel";
 import { WarLedger } from "@/components/WarLedger";
 
@@ -47,7 +46,18 @@ export default function Home() {
       .catch(() => {});
   }, []);
   const [rows, setRows] = useState<LedgerRow[]>([]);
-  const [centerTab, setCenterTab] = useState<"atlas" | "companion" | "advisor">("atlas");
+  const [centerTab, setCenterTab] = useState<"atlas" | "advisor">("atlas");
+  const [centerOpen, setCenterOpen] = useState(true);
+
+  useEffect(() => {
+    setCenterOpen(localStorage.getItem("eql.centerOpen") !== "0");
+  }, []);
+  const toggleCenter = () => {
+    setCenterOpen((v) => {
+      localStorage.setItem("eql.centerOpen", v ? "0" : "1");
+      return !v;
+    });
+  };
 
   // Monotonic id stamped on receipt — stable React keys for ledger rows.
   const idRef = useRef(0);
@@ -178,43 +188,52 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="hud-grid">
+      <div className="hud-grid" data-combat={centerOpen ? undefined : "1"}>
         <CharacterPanel snap={snap} onSnapChange={setSnap} />
-        <div className="center-stack">
-          <div className="tab-row" role="tablist">
-            <button
-              role="tab"
-              aria-selected={centerTab === "atlas"}
-              data-active={centerTab === "atlas"}
-              onClick={() => setCenterTab("atlas")}
-            >
-              Atlas
-            </button>
-            <button
-              role="tab"
-              aria-selected={centerTab === "companion"}
-              data-active={centerTab === "companion"}
-              onClick={() => setCenterTab("companion")}
-            >
-              Companion
-            </button>
-            <button
-              role="tab"
-              aria-selected={centerTab === "advisor"}
-              data-active={centerTab === "advisor"}
-              onClick={() => setCenterTab("advisor")}
-            >
-              Advisor
-            </button>
+        {centerOpen ? (
+          <div className="center-stack">
+            <div className="tab-row" role="tablist">
+              <button
+                role="tab"
+                aria-selected={centerTab === "atlas"}
+                data-active={centerTab === "atlas"}
+                onClick={() => setCenterTab("atlas")}
+              >
+                Atlas
+              </button>
+              <button
+                role="tab"
+                aria-selected={centerTab === "advisor"}
+                data-active={centerTab === "advisor"}
+                onClick={() => setCenterTab("advisor")}
+              >
+                Advisor
+              </button>
+              <button
+                type="button"
+                className="tab-collapse"
+                onClick={toggleCenter}
+                title="Hide the Atlas/Advisor panel — combat layout: vitals + encounters up top, full-width ledger below"
+              >
+                ◂ hide
+              </button>
+            </div>
+            {centerTab === "atlas" ? (
+              <AtlasPanel zone={snap?.zone ?? null} position={snap?.position ?? null} />
+            ) : (
+              <AdvisorPanel snap={snap} onSnapChange={setSnap} />
+            )}
           </div>
-          {centerTab === "atlas" ? (
-            <AtlasPanel zone={snap?.zone ?? null} position={snap?.position ?? null} />
-          ) : centerTab === "companion" ? (
-            <CompanionPanel />
-          ) : (
-            <AdvisorPanel snap={snap} onSnapChange={setSnap} />
-          )}
-        </div>
+        ) : (
+          <button
+            type="button"
+            className="center-reopen"
+            onClick={toggleCenter}
+            title="Show the Atlas/Advisor panel"
+          >
+            Atlas · Advisor ▸
+          </button>
+        )}
         <WarLedger rows={rows} />
         <EncounterPanel
           encounters={snap?.encounters ?? []}

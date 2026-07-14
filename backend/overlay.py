@@ -10,6 +10,9 @@ the game. Scroll Lock ON makes it movable and interactive: click the title
 to switch mode, the segment label to switch segment, drag to move,
 double-click to close. Passive: reads the HTTP API only.
 
+The overlay is a singleton (a second launch exits immediately) and closes
+itself when the game exits — no orphan meters after you camp for the night.
+
 Run: python -m backend.overlay   (or the Overlay button in the web header)
 """
 import colorsys
@@ -129,6 +132,7 @@ class OverlayMeter:
 
         threading.Thread(target=self._poll_char, daemon=True).start()
         threading.Thread(target=self._poll_encounters, daemon=True).start()
+        threading.Thread(target=self._watch_game, daemon=True).start()
         self.root.after(300, self._render)
 
     # ---- interaction (only reachable while Scroll Lock is ON) -------------
@@ -187,6 +191,27 @@ class OverlayMeter:
             except Exception:
                 pass
             time.sleep(5.0)
+
+    def _watch_game(self) -> None:
+        """Close the overlay when eqgame.exe exits (after it has been seen
+        running at least once — launching the overlay first is fine)."""
+        try:
+            import psutil
+        except ImportError:
+            return
+        seen = False
+        while True:
+            try:
+                running = any((p.info.get("name") or "").lower() == "eqgame.exe"
+                              for p in psutil.process_iter(["name"]))
+            except Exception:
+                running = seen  # scan hiccup: don't close on bad data
+            if running:
+                seen = True
+            elif seen:
+                self.root.after(0, self.root.destroy)
+                return
+            time.sleep(5)
 
     # ---- paint ---------------------------------------------------------
     def _render(self) -> None:
@@ -249,5 +274,14 @@ class OverlayMeter:
         self.root.after(500, self._render)
 
 
+def _already_running() -> bool:
+    """Named-mutex singleton: survives backend restarts losing the process
+    handle (which used to allow a second overlay on the next toggle)."""
+    ctypes.windll.kernel32.CreateMutexW(None, False, "EQLCompanionOverlayMutex")
+    return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+
+
 if __name__ == "__main__":
+    if _already_running():
+        raise SystemExit(0)
     OverlayMeter().root.mainloop()

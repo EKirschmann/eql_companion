@@ -42,12 +42,14 @@ RE_SKILL = re.compile(r"^You have become better at (.+?)! \((\d+)\)")
 RE_LOOT = re.compile(r"^--You have looted an? (.+?)\.--")
 # EQL upgrade-loot: "You looted an X +2 from the Y's corpse to create an X +3"
 RE_LOOT_UPGRADE = re.compile(
-    r"^You looted an? (.+?) from (.+?)(?: to create an? (.+?))?\.?$")
+    r"^You looted an? (.+?) from (.+?)"
+    r"(?: and sold it for (.+?))?(?: to create an? (.+?))?\.?$")
 # EQL DoT ticks: "A dread bone has taken 32 damage from your Stinging Swarm."
 RE_DOT = re.compile(r"^(.+?) has taken (\d+) damage from your (.+?)\.")
 RE_MISS_OUT = re.compile(
     r"^You try to (\w+) (.+?), but (?:miss|.+? (?:dodges|parries|blocks|ripostes))!")
-RE_MISS_IN = re.compile(r"^(.+?) tries to (\w+) YOU, but misses!")
+RE_MISS_IN = re.compile(
+    r"^(.+?) tries to (\w+) YOU, but (?:misses|YOU (dodge|parry|block|riposte)s?)!")
 RE_COIN = re.compile(r"^You receive (.+?) from the corpse")
 # /loc output order is Y, X, Z
 RE_LOC = re.compile(r"^Your Location is (-?[\d.]+), (-?[\d.]+), (-?[\d.]+)")
@@ -171,14 +173,16 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
         return ev.Loot(item=lo.group(1), **base)
     if lu := RE_LOOT_UPGRADE.match(msg):
         return ev.Loot(item=lu.group(1), source=lu.group(2),
-                       upgraded_to=lu.group(3), **base)
+                       sold=bool(lu.group(3)), sold_for=lu.group(3),
+                       upgraded_to=lu.group(4), **base)
     if dt := RE_DOT.match(msg):
         return ev.DotDamage(target=dt.group(1), damage=int(dt.group(2)),
                             spell=dt.group(3), **base)
     if mo := RE_MISS_OUT.match(msg):
         return ev.MissOut(verb=mo.group(1), target=mo.group(2), **base)
     if mi := RE_MISS_IN.match(msg):
-        return ev.MissIn(attacker=mi.group(1), verb=mi.group(2), **base)
+        return ev.MissIn(attacker=mi.group(1), verb=mi.group(2),
+                         defense=mi.group(3) or "miss", **base)
     if co := RE_COIN.match(msg):
         return ev.Coin(amount=co.group(1), **base)
     if lc := RE_LOC.match(msg):

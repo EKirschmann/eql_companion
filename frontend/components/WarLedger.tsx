@@ -89,6 +89,16 @@ export function WarLedger({ rows: allRows }: { rows: LedgerRow[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [mineOnly, setMineOnly] = useState(true);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    setOpen(localStorage.getItem("eql.ledgerOpen") !== "0");
+  }, []);
+  const toggleOpen = () => {
+    setOpen((v) => {
+      localStorage.setItem("eql.ledgerOpen", v ? "0" : "1");
+      return !v;
+    });
+  };
 
   // Filter, keep only the most recent 50, newest first (top of the list).
   const filtered = mineOnly
@@ -110,7 +120,7 @@ export function WarLedger({ rows: allRows }: { rows: LedgerRow[] }) {
   }, [rows]);
 
   return (
-    <section className="panel ledger-panel">
+    <section className="panel ledger-panel" data-collapsed={open ? undefined : "1"}>
       <div className="panel-title">
         War Ledger
         <label className="ledger-filter">
@@ -121,7 +131,16 @@ export function WarLedger({ rows: allRows }: { rows: LedgerRow[] }) {
           />
           Mine only
         </label>
+        <button
+          type="button"
+          className="ledger-collapse"
+          onClick={toggleOpen}
+          title={open ? "Collapse the ledger to just this bar" : "Expand the ledger"}
+        >
+          {open ? "▾ hide" : "▸ show"}
+        </button>
       </div>
+      {open && (
       <div className="panel-body" ref={scrollRef} onScroll={onScroll}>
         {rows.length === 0 ? (
           <p className="ledger-empty">
@@ -150,6 +169,7 @@ export function WarLedger({ rows: allRows }: { rows: LedgerRow[] }) {
           </ul>
         )}
       </div>
+      )}
     </section>
   );
 }

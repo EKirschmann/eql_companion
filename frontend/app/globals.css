@@ -1464,3 +1464,107 @@ button.app-version:hover { color: var(--gold-bright); }
   margin-left: 8px;
 }
 .update-msg[data-newer] { color: var(--gold-bright); }
+
+.adv-purchase {
+  font-size: 13px;
+  margin: 6px 0 2px;
+}
+.adv-purchase-note {
+  font-size: 11.5px;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.6));
+  margin: 0;
+}
+
+.adv-pick { width: 24px; }
+.adv-pick-count {
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  margin-left: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---- combat layout: center hidden -> vitals + encounters top, ledger below */
+.tab-collapse {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.tab-collapse:hover { color: var(--gold-bright); }
+.center-reopen {
+  writing-mode: vertical-rl;
+  background: rgba(18, 21, 26, 0.82);
+  border: 1px solid var(--hairline-dim);
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  padding: 12px 3px;
+}
+.center-reopen:hover { color: var(--gold-bright); border-color: var(--hairline); }
+/* combat mode reflows into the freed width instead of compressing:
+   encounter sections spread as columns, vitals keeps natural height,
+   the ledger becomes a short full-width strip (~14 rows) */
+.hud-grid[data-combat] {
+  grid-template-columns: 340px 26px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.hud-grid[data-combat] > .panel {
+  min-height: 0;
+  overflow-y: auto;
+}
+.hud-grid[data-combat] > .panel:last-child .panel-body {
+  column-width: 360px;
+  column-gap: 20px;
+}
+.hud-grid[data-combat] > .panel:last-child .enc-summary,
+.hud-grid[data-combat] > .panel:last-child .enc-agg {
+  break-inside: avoid;
+}
+.hud-grid[data-combat] > .panel:last-child .enc-agg {
+  margin-top: 0;
+  padding-top: 14px;
+}
+.hud-grid[data-combat] > .panel:first-child { grid-row: 1; grid-column: 1; }
+.hud-grid[data-combat] .center-reopen { grid-row: 1 / -1; grid-column: 2; }
+.hud-grid[data-combat] > .panel:last-child { grid-row: 1; grid-column: 3; }
+.hud-grid[data-combat] .ledger-panel {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  max-height: 340px;  /* ~14 ledger rows — glance strip, not a wall */
+}
+
+.enc-defense {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--heal);
+  margin-top: 2px;
+}
+
+/* encounter text sizing + collapsible ledger */
+.font-scale { display: inline-flex; gap: 4px; margin-left: 10px; }
+.font-scale button {
+  background: none;
+  border: 1px solid var(--hairline-dim);
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.font-scale button:hover { color: var(--gold-bright); border-color: var(--hairline); }
+.ledger-collapse {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  font-size: 11px;
+  cursor: pointer;
+}
+.ledger-collapse:hover { color: var(--gold-bright); }
+.ledger-panel[data-collapsed] { max-height: none; }
+.hud-grid[data-combat] .ledger-panel[data-collapsed] { max-height: none; }

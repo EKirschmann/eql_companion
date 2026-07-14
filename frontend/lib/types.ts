@@ -66,6 +66,8 @@ export interface EncounterAlly {
 }
 
 export interface Encounter {
+  in_hits?: number;
+  defense?: Record<string, number>;
   active: boolean;
   started: string;
   allies: EncounterAlly[];
@@ -313,6 +315,7 @@ export interface GearAdvice {
 }
 
 export interface Advice {
+  purchase?: PurchaseItem[];
   source: "llm" | "builtin";
   grounding: "wiki" | "memory";
   generated: string;
@@ -339,6 +342,12 @@ export interface Advice {
   horizon: AdvisorHorizon[];
   locations: AdvisorLocation[];
   class_notes: AdvisorClassNote[];
+}
+
+export interface PurchaseItem {
+  name: string;
+  level: number;
+  now: boolean;
 }
 
 export interface HuntingZone {

@@ -1,21 +1,33 @@
 # EQL Companion
 
 A real-time companion app for **EverQuest Legends**. It tails your combat log
-and gives you a live HUD in the browser — no game files touched, nothing
-injected, purely passive.
+and gives you a live HUD in the browser — nothing injected, nothing touching
+the game process. The one thing it can write is optional: recommended spell
+sets into your character's saved-loadout file (with a backup), so one
+in-game `/memspellset companion` loads the whole advised bar.
 
 **What you get**
 
-- **Vitals & War Ledger** — live DPS, session stats, hit rate, XP, loot, a
-  streaming combat feed, per-pull encounter breakdowns and group DPS
+- **Vitals & War Ledger** — live DPS, session stats, hit rate, XP, loot
+  (with sold tags), a streaming combat feed, per-pull encounter breakdowns
+  with group/raid DPS and a defense line (dodge/parry/block/riposte)
+- **Combat dashboard** — hide the Atlas/Advisor panel and the encounter view
+  spreads across the freed width; the ledger collapses to a strip;
+  encounter text size is adjustable
 - **Atlas** — zone charts with a live position dot, zone-to-zone routing,
   "true walls" mined from the game's own map geometry, and a textured 3D
   dollhouse view with a follow camera
-- **Advisor** — spell loadout, AA spending, upgrade warnings, gear-slot
-  recommendations, exaltation tracking, and where-to-hunt picks — grounded in
+- **Advisor** — spell loadout with pick-and-choose checkboxes, AA spending,
+  upgrade warnings, a vendor shopping list, gear-slot recommendations,
+  exaltation tracking (typed sockets), and where-to-hunt picks — grounded in
   your actual spellbook/inventory exports and the EQL wiki, with every
-  suggestion machine-verified (owned, level-legal, not superseded)
-- **Overlay** — an optional always-on-top combat strip over the game
+  suggestion machine-verified (owned, level-legal, not superseded).
+  One click writes the picks as in-game spell sets — a combat loadout
+  (gems auto-ordered: DD, DoTs, AoE, heals at gem 8, utility, pets) and a
+  pre-buff set (permanent buffs first, then longest-duration)
+- **Overlay** — a Details-style damage meter over the game: ranked
+  class-colored bars up to raid size, damage/DPS modes, this-fight or
+  last-5-fights segments; closes itself when the game exits
 
 ## Requirements
 
