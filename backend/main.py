@@ -480,7 +480,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.4.2"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.5.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -792,6 +792,25 @@ async def update_check():
     newer = latest is not None and _parse_ver(latest) > _parse_ver(APP_VERSION)
     return {"current": APP_VERSION, "latest": latest, "update_available": newer,
             "how": "close the companion and run update_companion.bat" if newer else None}
+
+
+@app.post("/api/update/run")
+async def run_update():
+    """Launch the updater in its own console window (visible progress,
+    survives the backend restarting under it). update_companion.bat routes
+    git installs to git pull and ZIP installs to the Python downloader."""
+    import subprocess
+    bat = Path(__file__).resolve().parent.parent / "update_companion.bat"
+    if not bat.exists():
+        raise HTTPException(404, "update_companion.bat not found")
+    subprocess.Popen(
+        ["cmd", "/c", "start", "EQL Companion update", str(bat)],
+        cwd=str(bat.parent),
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+    return {"launched": True,
+            "note": "Updating in a separate window — the app restarts "
+                    "itself; refresh this page when the window says done."}
 
 
 @app.get("/api/llm")

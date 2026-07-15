@@ -4,6 +4,30 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.5.0 — 2026-07-14
+
+- **Update available, one click**: the app checks GitHub quietly (on load
+  and every 6 hours) and shows an "Update available — vX.Y.Z" button next
+  to the version; clicking it runs the updater in its own window. Updates
+  no longer need git at all — ZIP installs update themselves via a
+  built-in downloader that never touches your settings or data. Plus
+  INSTALL.md: a plain-language install guide (no git, no command line).
+- **Pet support, properly**: set your pet's equipment slot count in the
+  Advisor and the gear consult builds it a loadout from spare bags/bank
+  items (player keeps stat priority; at least one weapon). Pet abilities
+  get their own encounter section; a mapped pet's kills and damage count
+  as yours; a Vitals hint reminds you to /pet leader after summoning.
+- **Encounter tables**: per-ability hit/cast counts (the Details-style x
+  column); group heals show WHO healed; every fight shows a defense line.
+- **Session hunting fixed**: XP attribution follows EQL's real line order
+  (XP prints before its kill) — chain pulls no longer mis-credit; sorted
+  by XP; per-level XP resets on ding; auto-sold loot shows "(sold)".
+- **Advisor**: saved counsel restores after any restart (marked stale when
+  your context moved on); exaltation moves respect class restrictions;
+  keep-rows render dimmed; collapsed-ledger width goes to the encounter
+  panel; vendor shopping list; loadout warnings ignore rituals and
+  item-granted casts.
+
 ## v1.4.2 — 2026-07-14
 
 - Collapsing the War Ledger in the normal layout now actually frees its

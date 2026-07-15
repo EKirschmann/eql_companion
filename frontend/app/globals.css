@@ -1631,3 +1631,16 @@ button.app-version:hover { color: var(--gold-bright); }
   padding: 6px 10px;
   margin-bottom: 8px;
 }
+
+.update-avail {
+  margin-left: 10px;
+  background: none;
+  border: 1px solid var(--gold);
+  color: var(--gold-bright);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.update-avail:hover { background: rgba(200, 170, 110, 0.12); }

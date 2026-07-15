@@ -23,6 +23,27 @@ export default function Home() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [overlayOn, setOverlayOn] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<{ text: string; newer: boolean } | null>(null);
+  const [updateAvail, setUpdateAvail] = useState<string | null>(null);
+
+  // quiet periodic check: on load and every 6 hours (GitHub is fine with it)
+  useEffect(() => {
+    const check = () =>
+      apiGet<{ latest: string | null; update_available?: boolean }>("/api/update-check")
+        .then((r) => setUpdateAvail(r.update_available && r.latest ? r.latest : null))
+        .catch(() => {});
+    check();
+    const id = setInterval(check, 6 * 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const runUpdate = async () => {
+    try {
+      const r = await apiSend<{ note: string }>("/api/update/run", {});
+      setUpdateMsg({ text: r.note, newer: true });
+    } catch {
+      setUpdateMsg({ text: "couldn't launch the updater — run update_companion.bat by hand", newer: false });
+    }
+  };
 
   const checkUpdates = async () => {
     setUpdateMsg({ text: "checking…", newer: false });
@@ -132,6 +153,16 @@ export default function Home() {
             >
               v{APP_VERSION}
             </button>
+            {updateAvail && !updateMsg && (
+              <button
+                type="button"
+                className="update-avail"
+                onClick={runUpdate}
+                title={`v${updateAvail} is out — click to update (runs update_companion.bat in its own window)`}
+              >
+                Update available — v{updateAvail}
+              </button>
+            )}
             {updateMsg && (
               <span className="update-msg" data-newer={updateMsg.newer ? "1" : undefined}>
                 {updateMsg.text}
