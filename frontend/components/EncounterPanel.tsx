@@ -10,12 +10,13 @@ function fightLabel(idx: number, enc: Encounter): string {
   return idx === 1 ? "1 fight ago" : `${idx} fights ago`;
 }
 
-function AbilityTable({ abilities }: { abilities: EncounterAbility[] }) {
+function AbilityTable({ abilities, petSection }: { abilities: EncounterAbility[]; petSection?: boolean }) {
   return (
     <table className="enc-table">
       <thead>
         <tr>
           <th scope="col">Ability</th>
+          <th scope="col" title="Successful hits / casts">×</th>
           <th scope="col">Avg</th>
           <th scope="col">Total</th>
           <th scope="col">DPS</th>
@@ -26,11 +27,13 @@ function AbilityTable({ abilities }: { abilities: EncounterAbility[] }) {
           <tr key={a.name} data-kind={a.kind}>
             <td className="enc-name" title={`${a.hits} hit${a.hits === 1 ? "" : "s"}`}>
               <span className="enc-rule" aria-hidden />
-              {a.name}
-              {(a.kind === "dot" || a.kind === "pet") && (
+              {petSection ? a.name.replace(/^Pet: /, "") : a.name}
+              {a.kind === "dot" && <span className="enc-tag">{a.kind}</span>}
+              {!petSection && a.kind === "pet" && (
                 <span className="enc-tag">{a.kind}</span>
               )}
             </td>
+            <td className="enc-count">{a.hits}</td>
             <td>{fmt(a.avg)}</td>
             <td>{fmt(a.total)}</td>
             <td>{a.dps}</td>
@@ -161,7 +164,20 @@ export const EncounterPanel = memo(function EncounterPanel({
               )}
             </div>
 
-            <AbilityTable abilities={enc.abilities} />
+            <AbilityTable abilities={enc.abilities.filter((a) => a.kind !== "pet")} />
+            {enc.abilities.some((a) => a.kind === "pet") && (
+              <div className="enc-agg">
+                <h3>
+                  Pet ·{" "}
+                  {fmt(enc.abilities.filter((a) => a.kind === "pet")
+                    .reduce((s, a) => s + a.total, 0))}
+                </h3>
+                <AbilityTable
+                  abilities={enc.abilities.filter((a) => a.kind === "pet")}
+                  petSection
+                />
+              </div>
+            )}
 
             {enc.heals.length > 0 && (
               <div className="enc-agg">
@@ -175,7 +191,16 @@ export const EncounterPanel = memo(function EncounterPanel({
                 <h3>
                   Across last {summary.encounters} fights · {summary.duration}s in combat
                 </h3>
-                <AbilityTable abilities={summary.abilities} />
+                <AbilityTable abilities={summary.abilities.filter((a) => a.kind !== "pet")} />
+                {summary.abilities.some((a) => a.kind === "pet") && (
+                  <>
+                    <div className="adv-sub" style={{ marginTop: 10 }}>Pet</div>
+                    <AbilityTable
+                      abilities={summary.abilities.filter((a) => a.kind === "pet")}
+                      petSection
+                    />
+                  </>
+                )}
                 {summary.heals.length > 0 && (
                   <>
                     <div className="adv-sub" style={{ marginTop: 10 }}>Healing</div>

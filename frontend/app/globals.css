@@ -1618,3 +1618,8 @@ button.app-version:hover { color: var(--gold-bright); }
 .hud-grid:not([data-combat]) .ledger-panel[data-collapsed] .ledger-collapse {
   margin-left: 0;
 }
+
+.enc-count {
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+  font-size: 11px;
+}
