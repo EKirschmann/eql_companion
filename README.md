@@ -52,6 +52,10 @@ over plain HTTP automatically — no Node beyond the UI is required.
 
 ## Setup — the easy way
 
+> Never installed anything like this before? **[INSTALL.md](INSTALL.md)**
+> walks through every click — no git or command line knowledge needed
+> (download the ZIP, extract, run `install_companion.bat`).
+
 ```
 git clone https://github.com/EKirschmann/eql_companion
 cd eql_companion
