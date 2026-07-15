@@ -189,6 +189,11 @@ ZONE_ALIASES = {
     "guk": "Upper Guk",
     "ruins of old guk": "Lower Guk",
     "old guk": "Lower Guk",
+    # EQL's in-game names vs the classic chart/graph keys
+    "clan crushbone": "Crushbone",
+    "clan runnyeye": "Runnyeye",
+    "castle mistmoore": "Mistmoore Castle",
+    "estate of unrest": "The Estate of Unrest",
 }
 
 
