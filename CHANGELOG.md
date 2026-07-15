@@ -4,6 +4,16 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.5.1 — 2026-07-14
+
+- Fixed installs failing on Python 3.13: the OCR engine package now
+  selects per Python version (rapidocr-onnxruntime up to 3.12, its
+  successor rapidocr on 3.13+) — screen-OCR position tracking works on
+  both. The installer also offers to install Python and Node.js for you
+  via winget, and its window can no longer vanish before you read it.
+- Downloads and one-click updates now track tagged releases, not
+  in-development code.
+
 ## v1.5.0 — 2026-07-14
 
 - **Update available, one click**: the app checks GitHub quietly (on load

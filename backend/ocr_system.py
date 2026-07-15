@@ -34,7 +34,12 @@ try:
     import numpy as np
     import psutil
     from PIL import Image
-    from rapidocr_onnxruntime import RapidOCR
+    try:
+        from rapidocr_onnxruntime import RapidOCR   # Python <= 3.12
+        _OCR_V2 = False
+    except ImportError:
+        from rapidocr import RapidOCR               # successor pkg, 3.13+
+        _OCR_V2 = True
     HAS_DEPS = True
     _IMPORT_ERROR = None
 except ImportError as e:  # keep the app booting without OCR extras
@@ -93,6 +98,9 @@ def _capture_and_ocr(region: dict) -> str:
                          "width": region["width"], "height": region["height"]})
     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
+    if _OCR_V2:
+        out = _get_engine()(np.array(img))
+        return "\n".join(list(getattr(out, "txts", None) or []))
     result, _elapsed = _get_engine()(np.array(img))
     return "\n".join(r[1] for r in (result or []))
 
