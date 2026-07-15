@@ -315,17 +315,12 @@ class CharacterTracker:
                 self.xp_ticks += 1
                 if e.percent:
                     self.xp_percent += e.percent
-                    # EQL prints the XP line BEFORE the kill line, so hold it
-                    # for the kill that lands next — while still attributing
-                    # backward when a kill preceded it
-                    if (self._last_kill and
-                            (e.ts - self._last_kill[1]).total_seconds() <= 6):
-                        self.mob_stats.setdefault(
-                            self._last_kill[0],
-                            {"kills": 0, "xp_percent": 0.0, "loots": []},
-                        )["xp_percent"] += e.percent
-                    else:
-                        self._pending_xp = (e.ts, e.percent)
+                    # EQL always prints the XP line BEFORE its kill line —
+                    # hold it for the kill landing next. (Attributing
+                    # backward to the previous kill mis-credits every XP
+                    # tick during chain pulls, where the prior kill is
+                    # seconds old.)
+                    self._pending_xp = (e.ts, e.percent)
             elif isinstance(e, ev.AAPoint):
                 self.aa_points += 1
                 if self.aa_available is not None:
