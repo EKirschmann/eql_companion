@@ -155,6 +155,7 @@ export interface ZoneGeometry3D {
 }
 
 export interface Snapshot {
+  pet_slots?: number | null;
   name: string;
   server: string;
   level: number | null;
@@ -303,15 +304,16 @@ export interface GearExalt {
   why: string;
 }
 
-export interface PetHand {
+export interface PetGear {
   item: string;
+  slot?: string;
   why: string;
   where?: string;
 }
 
 export interface GearAdvice {
   stale?: boolean;
-  pet_hand?: PetHand[];
+  pet_gear?: PetGear[];
   source: "llm" | "builtin";
   generated: string;
   note: string | null;

@@ -583,7 +583,7 @@ async def _builtin_gear(ctx: dict) -> dict:
                 "cross-item stat comparisons and farming targets need a "
                 "model from the Counsel selector.",
         "slots": _full_slot_table(recs, worn),
-        "farm": [], "exaltations": exalts, "unknown": [], "pet_hand": [],
+        "farm": [], "exaltations": exalts, "unknown": [], "pet_gear": [],
     }
 
 
@@ -802,7 +802,7 @@ __GEAR__
 EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
 __EXALTS__
 
-PET HANDOFF (only when the trio has a pet class): pets equip items HANDED to them — weapons boost their damage (procs work), armor their AC. Handed items are DESTROYED when the pet dies or repops, so only ever suggest cheap unused duplicates from bags/bank (looted Fine Steel etc.) — never worn gear, never upgrade fodder (+N ranks), never exaltation hosts. Mark uncertainty where EQL may differ from classic.
+__PET_BLOCK__
 
 Reply with ONLY a JSON object (no fences, no prose):
 {
@@ -810,7 +810,7 @@ Reply with ONLY a JSON object (no fences, no prose):
   "slots": [{"slot": "Chest", "current": "...", "recommend": "...", "why": "..."}],
   "farm": [{"item": "...", "slot": "...", "zone": "...", "source": "...", "why": "..."}],
   "exaltations": [{"name": "...", "move_to": "...", "why": "..."}],
-  "pet_hand": [{"item": "...", "why": "..."}]
+  "pet_gear": [{"item": "...", "slot": "...", "why": "..."}]
 }
 
 Rules:
@@ -905,7 +905,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
         return {**base, "source": "builtin", "note":
                 "No inventory export found — type /outputfile inventory "
                 "in-game, then press check exports.",
-                "slots": [], "farm": [], "exaltations": [], "pet_hand": [], "unknown": [], "pet_hand": []}
+                "slots": [], "farm": [], "exaltations": [], "pet_gear": [], "unknown": []}
     if llm_active()["provider"] == "none":
         return {**base, **(await _builtin_gear(ctx))}
     classes = [x.strip() for x in (ctx.get("class_str") or "").split("/")
@@ -939,7 +939,25 @@ async def generate_gear_advice(ctx: dict) -> dict:
         f"- Currently worn: "
         + "; ".join(f"{k}: {v}" for k, v in sorted((ctx.get('worn') or {}).items())),
     ]
+    pet_slots = ctx.get("pet_slots") or 0
+    if pet_slots > 0:
+        pet_block = (
+            f"PET LOADOUT: the pet has {pet_slots} equipment slots. Pets "
+            "equip items HANDED to them — weapons boost their damage (procs "
+            "work), armor their AC — and handed items are DESTROYED when "
+            "the pet dies or is re-summoned. From bags/bank ONLY (never "
+            "worn gear, never exaltation hosts), pick up to "
+            f"{pet_slots} items for the pet in 'pet_gear': at least one "
+            "weapon, then the best remaining armor. THE PLAYER ALWAYS HAS "
+            "STAT PRIORITY: never assign the pet an item that would beat "
+            "something the player wears in a comparable slot — the pet gets "
+            "the leftovers after every player upgrade is settled.")
+    else:
+        pet_block = ("PET LOADOUT: none — pet_gear must be []. (The player "
+                     "sets their pet's slot count in the Advisor tab when "
+                     "they run a pet.)")
     prompt = (GEAR_PROMPT
+              .replace("__PET_BLOCK__", pet_block)
               .replace("__CONTEXT__", chr(10).join(lines))
               .replace("__GEAR__", chr(10).join(gear["lines"]))
               .replace("__EXALTS__", chr(10).join(exalt_lines) or "none owned"))
@@ -967,7 +985,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
             pass
         return {**base, "source": "builtin",
                 "note": f"Live gear counsel needs the LLM ({str(e)[:60]}).",
-                "slots": [], "farm": [], "exaltations": [], "pet_hand": [],
+                "slots": [], "farm": [], "exaltations": [], "pet_gear": [],
                 "unknown": gear["unknown"][:10]}
 
     from backend.game_data import item_line as _item_line
@@ -1023,25 +1041,25 @@ async def generate_gear_advice(ctx: dict) -> dict:
             if len(slots) != before:
                 logger.info("Dropped secondary slot rec — 2H primary "
                             "recommendation occupies both hands")
-    pet_hand = []
+    pet_gear = []
     exalt_hosts = {(x.get("host") or "").lower()
                    for x in (ctx.get("exaltations") or [])}
     owned_locs = {}
     for it in items:
         owned_locs.setdefault(it["name"].lower(), it.get("where"))
-    for ph in _clean_list(data.get("pet_hand"), ("item", "why"),
-                          cap=4, require="item"):
+    for ph in _clean_list(data.get("pet_gear"), ("item", "slot", "why"),
+                          cap=max(0, int(ctx.get("pet_slots") or 0)),
+                          require="item"):
         low = ph["item"].lower()
         where = owned_locs.get(low)
-        if (where in ("bags", "bank") and _item_rank(ph["item"]) == 0
-                and low not in exalt_hosts):
+        if where in ("bags", "bank") and low not in exalt_hosts:
             ph["where"] = where
-            pet_hand.append(ph)
+            pet_gear.append(ph)
         else:
-            logger.info("Dropped pet-hand rec: %s (%s)", ph["item"], where)
+            logger.info("Dropped pet-gear rec: %s (%s)", ph["item"], where)
     return {**base, "source": "llm",
             "note": data.get("note"),
-            "pet_hand": pet_hand,
+            "pet_gear": pet_gear,
             "slots": _full_slot_table(slots, ctx.get("worn")),
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),

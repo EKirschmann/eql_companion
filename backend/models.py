@@ -25,6 +25,7 @@ class Character(Base):
     playstyle = Column(String, nullable=True)   # solo_dps, group_dps, tank, ...
     aa_available = Column(Integer, nullable=True)  # unspent AA points (user-set; +1 per gain)
     spell_slots = Column(Integer, nullable=True)   # spell slots unlocked via AAs (user-set)
+    pet_slots = Column(Integer, nullable=True)     # pet equipment slots (user-set, varies by class)
     owned_aas = Column(JSON, nullable=True)        # /alternateadv list roster (survives restarts)
     aa_synced = Column(String, nullable=True)      # iso stamp of that listing
     pet_owners = Column(JSON, nullable=True)       # pet -> owner map from leader lines
@@ -40,6 +41,7 @@ class Character(Base):
             "level": self.level, "class_str": self.class_str, "race": self.race,
             "zone": self.zone, "playstyle": self.playstyle,
             "aa_available": self.aa_available, "spell_slots": self.spell_slots,
+            "pet_slots": self.pet_slots,
         }
 
 

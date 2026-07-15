@@ -85,6 +85,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   const [error, setError] = useState<string | null>(null);
   const [aaDraft, setAaDraft] = useState("");
   const [slotsDraft, setSlotsDraft] = useState("");
+  const [petSlotsDraft, setPetSlotsDraft] = useState("");
   const [book, setBook] = useState<SpellbookInfo | null>(null);
   const [ownedAAs, setOwnedAAs] = useState<OwnedAAsInfo | null>(null);
   const [exports, setExports] = useState<ExportsStatus | null>(null);
@@ -142,6 +143,9 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   useEffect(() => {
     setSlotsDraft(snap?.spell_slots == null ? "" : String(snap.spell_slots));
   }, [snap?.spell_slots]);
+  useEffect(() => {
+    setPetSlotsDraft(snap?.pet_slots == null ? "" : String(snap.pet_slots));
+  }, [snap?.pet_slots]);
 
   const patch = async (body: Record<string, unknown>) => {
     try {
@@ -157,7 +161,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
     patch({ class_str: next.filter(Boolean).join("/") });
   };
 
-  const numberPatch = (draft: string, field: "aa_available" | "spell_slots") => {
+  const numberPatch = (draft: string, field: "aa_available" | "spell_slots" | "pet_slots") => {
     if (draft === "") return;
     const n = Number(draft);
     if (Number.isFinite(n) && n >= 0) patch({ [field]: Math.floor(n) });
@@ -366,6 +370,19 @@ export const AdvisorPanel = memo(function AdvisorPanel({
             onChange={(e) => setSlotsDraft(e.target.value)}
             onBlur={() => numberPatch(slotsDraft, "spell_slots")}
             onKeyDown={(e) => e.key === "Enter" && numberPatch(slotsDraft, "spell_slots")}
+          />
+        </div>
+        <div className="adv-field">
+          <label htmlFor="adv-pet-slots" title="Your pet's equipment slot count (varies by class) — the gear consult builds it a loadout from your spare bags/bank items">Pet slots</label>
+          <input
+            id="adv-pet-slots"
+            type="number"
+            min={0}
+            placeholder="0"
+            value={petSlotsDraft}
+            onChange={(e) => setPetSlotsDraft(e.target.value)}
+            onBlur={() => numberPatch(petSlotsDraft, "pet_slots")}
+            onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
           />
         </div>
         <div className="adv-field">
@@ -736,15 +753,17 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </ul>
                 </>
               )}
-              {gear && (gear.pet_hand?.length ?? 0) > 0 && (
+              {gear && (gear.pet_gear?.length ?? 0) > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Hand to pet — destroyed when the pet dies; cheap spares only
+                    Pet loadout ({snap?.pet_slots ?? "?"} slots) — hand these to the pet;
+                    lost if it dies or is re-summoned
                   </div>
                   <ul className="adv-list">
-                    {gear.pet_hand!.map((p) => (
+                    {gear.pet_gear!.map((p) => (
                       <li key={p.item}>
                         <strong>{p.item}</strong>
+                        {p.slot && <span className="adv-cls"> — {p.slot}</span>}
                         {p.where && <span className="adv-cls"> ({p.where})</span>}
                         <br />
                         {p.why}

@@ -61,6 +61,7 @@ Base.metadata.create_all(bind=engine)
 with engine.connect() as _conn:
     _cols = {r[1] for r in _conn.exec_driver_sql("PRAGMA table_info(characters)")}
     for _col, _typ in (("aa_available", "INTEGER"), ("spell_slots", "INTEGER"),
+                       ("pet_slots", "INTEGER"),
                        ("owned_aas", "TEXT"), ("aa_synced", "TEXT"),
                        ("pet_owners", "TEXT")):
         if _col not in _cols:
@@ -143,6 +144,7 @@ def _load_character_enrichment() -> None:
     tracker.race = row.race
     tracker.aa_available = row.aa_available
     tracker.spell_slots = row.spell_slots
+    tracker.pet_slots = row.pet_slots
     if row.owned_aas:
         tracker.owned_aas = dict(row.owned_aas)
         if row.aa_synced:
@@ -506,6 +508,7 @@ class CharacterPatch(BaseModel):
     level: Optional[int] = None
     aa_available: Optional[int] = None
     spell_slots: Optional[int] = None
+    pet_slots: Optional[int] = None
 
 
 @app.get("/health")
@@ -522,7 +525,7 @@ async def get_character():
 async def patch_character(patch: CharacterPatch, db: Session = Depends(get_db)):
     row = _sync_character_row(db)
     for field in ("playstyle", "class_str", "race", "level",
-                  "aa_available", "spell_slots"):
+                  "aa_available", "spell_slots", "pet_slots"):
         value = getattr(patch, field)
         if value is not None:
             setattr(row, field, value)
@@ -908,7 +911,7 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     WITHOUT running the LLM — the tab uses it to restore results on load."""
     global _gear_cache, _gear_sig
     inv = load_export(tracker.name, tracker.server, "Inventory")
-    sig = (tracker.class_str, tracker.level, tracker.race,
+    sig = (tracker.class_str, tracker.level, tracker.race, tracker.pet_slots,
            inv["updated"] if inv else None)
     sig = _sig_norm(sig)
     if _gear_cache is not None and _gear_sig == sig and not refresh:
@@ -921,7 +924,8 @@ async def get_gear(refresh: bool = False, cached: bool = False):
            "race": tracker.race, "playstyle": tracker.playstyle,
            "worn": (inv or {}).get("worn"),
            "inventory_items": (inv or {}).get("items"),
-           "exaltations": (inv or {}).get("exaltations")}
+           "exaltations": (inv or {}).get("exaltations"),
+           "pet_slots": tracker.pet_slots}
     advice = await generate_gear_advice(ctx)
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()
