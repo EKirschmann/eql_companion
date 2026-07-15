@@ -1,13 +1,18 @@
 @echo off
-rem EQL Companion launcher - backend (FastAPI :8000) + frontend (Next.js :3000)
-rem Runs from wherever the repo lives. If you use a venv/conda env, activate
-rem it first (or edit the ACTIVATE line below).
-set ACTIVATE=call conda activate eql-companion 2^>nul
+rem EQL Companion launcher - backend (:8000) + frontend (:3000).
+rem Default = production mode: no file watchers, no hot reload, ~350MB less
+rem RAM. Developers: start_companion.bat dev
+cd /d %~dp0
+if /i "%~1"=="dev" goto devmode
 
-start "EQL Companion - Backend" cmd /k "cd /d %~dp0 && %ACTIVATE% & uvicorn backend.main:app --reload"
+start "EQL Companion - Backend" cmd /k "cd /d %~dp0 && (call conda activate eql-companion 2>nul) & uvicorn backend.main:app"
+start "EQL Companion - Frontend" cmd /k "cd /d %~dp0frontend && set NEXT_DIST_DIR=.next-prod&& npm run start"
+goto open
 
-start "EQL Companion - Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
+:devmode
+start "EQL Companion - Backend (dev)" cmd /k "cd /d %~dp0 && (call conda activate eql-companion 2>nul) & uvicorn backend.main:app --reload"
+start "EQL Companion - Frontend (dev)" cmd /k "cd /d %~dp0frontend && npm run dev"
 
-rem Give the servers a moment, then open the dashboard
+:open
 timeout /t 6 /nobreak >nul
 start "" http://localhost:3000

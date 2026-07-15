@@ -96,23 +96,31 @@ def parse_loc_text(text: str) -> Optional[dict]:
     }
 
 
-def _capture_and_ocr(region: dict) -> str:
-    """Capture the region and OCR it (runs in a worker thread — blocking CPU)."""
+def _capture_and_ocr(region: dict, prev_hash: Optional[str] = None):
+    """Capture the region and OCR it (worker thread — blocking CPU).
+    Returns (text|None, frame_hash). When the captured pixels are identical
+    to prev_hash the ONNX inference is skipped entirely — standing still or
+    sitting in menus costs (almost) nothing."""
+    import hashlib
     import mss as _mss
     with _mss.mss() as sct:
         shot = sct.grab({"left": region["left"], "top": region["top"],
                          "width": region["width"], "height": region["height"]})
+    frame_hash = hashlib.md5(shot.bgra).hexdigest()
+    if prev_hash is not None and frame_hash == prev_hash:
+        return None, frame_hash
     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
     if _OCR_V2:
         out = _get_engine()(np.array(img))
-        return "\n".join(list(getattr(out, "txts", None) or []))
+        return "\n".join(list(getattr(out, "txts", None) or [])), frame_hash
     result, _elapsed = _get_engine()(np.array(img))
-    return "\n".join(r[1] for r in (result or []))
+    return "\n".join(r[1] for r in (result or [])), frame_hash
 
 
 async def ocr_region(region: dict) -> str:
-    return await asyncio.to_thread(_capture_and_ocr, region)
+    text, _h = await asyncio.to_thread(_capture_and_ocr, region)
+    return text or ""
 
 
 class OcrWatcher:
@@ -164,7 +172,14 @@ class OcrWatcher:
                 await asyncio.sleep(2.0)
                 continue
             try:
-                text = await ocr_region(cfg)
+                text, self._frame_hash = await asyncio.to_thread(
+                    _capture_and_ocr, cfg, getattr(self, "_frame_hash", None))
+                if text is None:
+                    # frame identical to the last one: position unchanged,
+                    # inference skipped — still a healthy read
+                    self.last_ok = time.strftime("%H:%M:%S")
+                    await asyncio.sleep(1.0)
+                    continue
                 self.last_text = text.strip() or None
                 parsed = parse_loc_text(text) if text else None
                 if parsed:
@@ -178,6 +193,7 @@ class OcrWatcher:
                         "x": parsed["y"], "y": parsed["x"], "z": parsed["z"],
                         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     }
+                    self.tracker._dirty = True
                     await self.ws_manager.broadcast(
                         {"type": "state", "data": self.tracker.snapshot()})
             except Exception as e:

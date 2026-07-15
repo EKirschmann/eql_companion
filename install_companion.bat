@@ -61,6 +61,10 @@ pip install -r requirements.txt || (echo pip install failed & pause & exit /b 1)
 echo Installing frontend dependencies...
 pushd frontend
 call npm install || (echo npm install failed & pause & exit /b 1)
+echo Building the interface (one time, about a minute)...
+set NEXT_DIST_DIR=.next-prod
+call npm run build || (echo interface build failed & pause & exit /b 1)
+set NEXT_DIST_DIR=
 popd
 
 python setup_wizard.py

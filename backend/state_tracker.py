@@ -103,6 +103,8 @@ class CharacterTracker:
         # set when a pet summon is cast but no pet maps to us — the pet's
         # damage lands in the ally rows until /pet leader is typed
         self.pet_hint = False
+        # session persistence writes only when something changed
+        self._dirty = True
 
     def _touch_encounter(self, ts: datetime) -> None:
         if (self.encounter is None or
@@ -341,6 +343,7 @@ class CharacterTracker:
                     if e.item not in stats["loots"] and len(stats["loots"]) < 8:
                         stats["loots"].append(e.item)
 
+        self._dirty = True
         if e.type not in ("other_out", "aa_list", "aa_meta", "who_other"):
             # other_out is too spammy; aa listing bursts are metadata
             self.ledger.append({**e.model_dump(mode="json"), "live": live})

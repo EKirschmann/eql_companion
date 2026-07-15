@@ -414,7 +414,8 @@ async def periodic_state_push():
         await asyncio.sleep(3.0)
         if ws_manager.connections:
             await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
-        if watcher:
+        if watcher and getattr(tracker, "_dirty", True):
+            tracker._dirty = False
             await asyncio.to_thread(session_state.save, tracker,
                                     str(watcher.path), watcher._offset)
 
@@ -480,7 +481,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.5.3"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.6.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)

@@ -4,6 +4,18 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.6.0 — 2026-07-15
+
+- **Much lighter on your PC**: the interface now runs as a production
+  build (~350MB less RAM, no file watchers) and the backend drops its
+  dev-mode reloader; the installer/updater build the interface once
+  (about a minute). Developers: `start_companion.bat dev` keeps the old
+  hot-reload behavior.
+- OCR position tracking skips its neural-net pass entirely when the
+  captured pixels haven't changed — standing still or sitting in menus
+  now costs (almost) no CPU.
+- Session snapshots write only when something actually happened.
+
 ## v1.5.3 — 2026-07-14
 
 - Fixed "CERTIFICATE_VERIFY_FAILED" when checking or downloading updates:

@@ -22,6 +22,10 @@ pip install -q -r requirements.txt
 echo Refreshing frontend dependencies...
 pushd frontend
 call npm install --silent
+echo Rebuilding the interface (about a minute)...
+set NEXT_DIST_DIR=.next-prod
+call npm run build
+set NEXT_DIST_DIR=
 popd
 
 echo.

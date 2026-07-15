@@ -84,8 +84,8 @@ def latest_tag() -> str | None:
     return None
 
 # never touched by the updater — user state and heavy build artifacts
-PRESERVE = {".env", ".env.bak", "data", "node_modules", ".next", ".git",
-            "backup"}
+PRESERVE = {".env", ".env.bak", "data", "node_modules", ".next",
+            ".next-prod", ".git", "backup"}
 # a running script/batch must not be rewritten mid-run — changed versions
 # land beside them as *.new with a notice
 SELF = {"update_companion.py", "update_companion.bat"}
@@ -139,6 +139,11 @@ def deps() -> None:
     say("Refreshing frontend dependencies ...")
     subprocess.run("npm install --silent", shell=True,
                    cwd=str(ROOT / "frontend"), check=False)
+    say("Rebuilding the interface (about a minute) ...")
+    import os
+    subprocess.run("npm run build", shell=True,
+                   cwd=str(ROOT / "frontend"), check=False,
+                   env={**os.environ, "NEXT_DIST_DIR": ".next-prod"})
 
 
 def main() -> None:

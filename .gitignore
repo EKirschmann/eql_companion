@@ -12,6 +12,7 @@ __pycache__/
 # Node / Next.js
 node_modules/
 frontend/.next/
+frontend/.next-prod/
 frontend/out/
 
 # Full stock backup is large (~200MB) and reproducible from the game install.
