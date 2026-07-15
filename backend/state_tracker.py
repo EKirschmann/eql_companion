@@ -83,6 +83,7 @@ class CharacterTracker:
         # Per-mob session stats (kills, attributed xp, loot seen on corpses)
         self.mob_stats: dict[str, dict] = {}
         self._last_kill: Optional[tuple] = None  # (foe key, ts) for xp attribution
+        self._pending_xp: Optional[tuple] = None  # (ts, pct): XP printed pre-kill
         # Finished pulls awaiting DB persistence (drained by the flush loop)
         self.pending_encounters: list[dict] = []
         # Injected by main: spellbook loader + whether a log file exists
@@ -115,6 +116,14 @@ class CharacterTracker:
                               "foes": {}}
         else:
             self.encounter["last"] = ts
+
+    def _absorb_pending_xp(self, mob: str, ts: datetime) -> None:
+        """XP lines precede their kill line in EQL — claim one held within 3s."""
+        if self._pending_xp and (ts - self._pending_xp[0]).total_seconds() <= 3:
+            self.mob_stats.setdefault(
+                mob, {"kills": 0, "xp_percent": 0.0, "loots": []},
+            )["xp_percent"] += self._pending_xp[1]
+        self._pending_xp = None
 
     def _encounter_heal(self, ts: datetime, label: str, amount: int) -> None:
         enc = self.encounter
@@ -278,9 +287,27 @@ class CharacterTracker:
                     mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
                 stats["kills"] += 1
                 self._last_kill = (mob, e.ts)
+                self._absorb_pending_xp(mob, e.ts)
                 if self.encounter and (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS:
                     self.encounter["last"] = e.ts
                     self._encounter_foe(e.target, slain=True)
+            elif isinstance(e, ev.OtherDeath):
+                # pet/ally killing blows: "A shin ghoul knight has been slain
+                # by Gonekab!" — OUR pet's kill counts as ours; any group kill
+                # that pays us XP shows up in Session hunting
+                killer = self.pet_owners.get(e.killer, e.killer)
+                mob = _foe_key(e.victim)
+                if killer.lower() == (self.name or "").lower():
+                    self.kills += 1
+                    stats = self.mob_stats.setdefault(
+                        mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
+                    stats["kills"] += 1
+                self._last_kill = (mob, e.ts)
+                self._absorb_pending_xp(mob, e.ts)
+                if (self.encounter and
+                        (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS
+                        and mob in self.encounter.get("foes", {})):
+                    self._encounter_foe(e.victim, slain=True)
             elif isinstance(e, ev.MyDeath):
                 self.deaths += 1
                 self.last_death = self._death_recap(e)
@@ -288,10 +315,17 @@ class CharacterTracker:
                 self.xp_ticks += 1
                 if e.percent:
                     self.xp_percent += e.percent
-                    # attribute to the mob slain moments ago (heuristic window)
+                    # EQL prints the XP line BEFORE the kill line, so hold it
+                    # for the kill that lands next — while still attributing
+                    # backward when a kill preceded it
                     if (self._last_kill and
                             (e.ts - self._last_kill[1]).total_seconds() <= 6):
-                        self.mob_stats[self._last_kill[0]]["xp_percent"] += e.percent
+                        self.mob_stats.setdefault(
+                            self._last_kill[0],
+                            {"kills": 0, "xp_percent": 0.0, "loots": []},
+                        )["xp_percent"] += e.percent
+                    else:
+                        self._pending_xp = (e.ts, e.percent)
             elif isinstance(e, ev.AAPoint):
                 self.aa_points += 1
                 if self.aa_available is not None:

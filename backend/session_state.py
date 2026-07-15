@@ -30,7 +30,7 @@ PERSIST_FIELDS = [
     "swings_hit", "swings_missed", "loots", "last_target", "last_event_at",
     "position", "session_max_dps", "ledger", "encounter",
     "encounter_history", "unknown_casts", "loadout_hint", "last_death",
-    "mob_stats", "_last_kill", "who_roster", "pet_owners", "owned_aas",
+    "mob_stats", "_last_kill", "_pending_xp", "who_roster", "pet_owners", "owned_aas",
     "_last_aa_seen", "_last_aa_name",
 ]
 _DEQUES = {"loots": 20, "ledger": 300, "encounter_history": 5}
