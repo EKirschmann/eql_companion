@@ -163,7 +163,10 @@ export const CharacterPanel = memo(function CharacterPanel({
                 </tr>
               </thead>
               <tbody>
-                {snap.mob_stats.slice(0, 8).map((m) => (
+                {[...snap.mob_stats]
+                  .sort((a, b) => (b.xp_percent ?? 0) - (a.xp_percent ?? 0) || b.kills - a.kills)
+                  .slice(0, 8)
+                  .map((m) => (
                   <tr key={m.name} title={m.loots.join(", ") || undefined}>
                     <td className="hunt-name">{m.name}</td>
                     <td>{m.kills}</td>

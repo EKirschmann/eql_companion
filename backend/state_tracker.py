@@ -98,6 +98,9 @@ class CharacterTracker:
         self.owned_aas: dict[str, dict] = {}
         self._last_aa_seen: Optional[datetime] = None
         self._last_aa_name: Optional[str] = None
+        # set when a pet summon is cast but no pet maps to us — the pet's
+        # damage lands in the ally rows until /pet leader is typed
+        self.pet_hint = False
 
     def _touch_encounter(self, ts: datetime) -> None:
         if (self.encounter is None or
@@ -112,6 +115,16 @@ class CharacterTracker:
                               "foes": {}}
         else:
             self.encounter["last"] = ts
+
+    def _encounter_heal(self, ts: datetime, label: str, amount: int) -> None:
+        enc = self.encounter
+        if (enc is None or
+                (ts - enc["last"]).total_seconds() > COMBAT_TIMEOUT_SECONDS):
+            return
+        hl = enc.setdefault("heals", {}).setdefault(
+            label, {"hits": 0, "total": 0})
+        hl["hits"] += 1
+        hl["total"] += amount
 
     def _encounter_ability(self, ts: datetime, name: str, kind: str, damage: int,
                            target: Optional[str] = None) -> None:
@@ -145,6 +158,12 @@ class CharacterTracker:
             self.position = {"x": e.x, "y": e.y, "z": e.z, "ts": e.ts.isoformat()}
         elif isinstance(e, ev.LevelUp):
             self.level = e.level
+            # XP boxes + hunting XP are per-LEVEL: a ding resets them (kills,
+            # loot, and damage stay session-wide)
+            self.xp_ticks = 0
+            self.xp_percent = 0.0
+            for stats in self.mob_stats.values():
+                stats["xp_percent"] = 0.0
         elif isinstance(e, ev.CharacterInfo):
             self.level = e.level
             if e.class_str:
@@ -157,6 +176,8 @@ class CharacterTracker:
         elif isinstance(e, ev.OtherCharInfo):
             self.who_roster[e.name] = {"level": e.level, "classes": e.classes}
         elif isinstance(e, ev.PetLeader):
+            if e.owner.lower() == (self.name or "").lower():
+                self.pet_hint = False
             if self.pet_owners.get(e.pet) != e.owner:
                 self.pet_owners[e.pet] = e.owner
                 self.pet_owners_dirty = True
@@ -244,13 +265,12 @@ class CharacterTracker:
                 self.healing_received += e.amount
             elif isinstance(e, ev.HealOut):
                 self.healing_done += e.amount
-                enc = self.encounter
-                if (enc is not None and
-                        (e.ts - enc["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS):
-                    hl = enc.setdefault("heals", {}).setdefault(
-                        e.spell, {"hits": 0, "total": 0})
-                    hl["hits"] += 1
-                    hl["total"] += e.amount
+                self._encounter_heal(e.ts, f"{e.spell} — You", e.amount)
+            elif isinstance(e, ev.OtherHeal):
+                if e.target.lower() == (self.name or "").lower():
+                    self.healing_received += e.amount
+                healer = self.pet_owners.get(e.healer, e.healer)
+                self._encounter_heal(e.ts, f"{e.spell} — {healer}", e.amount)
             elif isinstance(e, ev.Kill):
                 self.kills += 1
                 mob = _foe_key(e.target)
@@ -492,6 +512,10 @@ class CharacterTracker:
         if not self.has_log:
             hints.append({"command": "/log on",
                           "reason": "No log file found — the companion is blind without one"})
+        if self.pet_hint:
+            hints.append({"command": "/pet leader",
+                          "reason": "A summoned pet is unmapped — its damage is "
+                                    "counting as an ally's, not yours"})
         if book is None:
             hints.append({"command": "/outputfile spellbook",
                           "reason": "No spellbook export found; the advisor cannot see owned spells"})

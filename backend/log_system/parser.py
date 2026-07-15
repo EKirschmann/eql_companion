@@ -56,7 +56,12 @@ RE_LOC = re.compile(r"^Your Location is (-?[\d.]+), (-?[\d.]+), (-?[\d.]+)")
 RE_BUFF_FADE = re.compile(r"^Your (.+?) spell has worn off")
 RE_HEAL = re.compile(r"^You have been healed for (\d+) (?:hit )?points")
 # "You healed Zizoo over time for 92 hit points by Blooming Heal."
-RE_HEAL_OUT = re.compile(r"^You healed (.+?)( over time)? for (\d+) hit points by (.+?)\.")
+RE_HEAL_OUT = re.compile(
+    r"^You healed (.+?)( over time)? for (\d+)(?: \(\d+\))? hit points by (.+?)\.")
+# "Bosh healed itself for 159 (210) hit points by Spirit Tap." — group
+# members, pets, and mobs: the healer IS named; parens = pre-cap value
+RE_OTHER_HEAL = re.compile(
+    r"^([A-Z][\w`]*) healed (.+?)( over time)? for (\d+)(?: \(\d+\))? hit points by (.+?)\.")
 # [13 Monk] Gentso (Iksar)   /   [65 Transcendent (Monk)] Gentso (Iksar) <Guild>
 RE_WHO = re.compile(r"^\[(\d+) (.+?)\] (\w+) \((.+?)\)")
 # "/pet leader": Gobaner says, 'My leader is Gentso.' — maps pets to owners
@@ -195,6 +200,10 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
     if ho := RE_HEAL_OUT.match(msg):
         return ev.HealOut(target=ho.group(1), over_time=bool(ho.group(2)),
                           amount=int(ho.group(3)), spell=ho.group(4), **base)
+    if oh := RE_OTHER_HEAL.match(msg):
+        return ev.OtherHeal(healer=oh.group(1), target=oh.group(2),
+                            over_time=bool(oh.group(3)), amount=int(oh.group(4)),
+                            spell=oh.group(5), **base)
 
     if om := RE_OUT_MELEE.match(msg):
         verb = _verb_root(om.group(1))

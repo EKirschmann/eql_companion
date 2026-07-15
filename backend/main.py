@@ -228,6 +228,16 @@ async def _check_cast(spell: str) -> None:
         classes = [c.strip() for c in (tracker.class_str or "").split("/") if c.strip()]
         if not classes:
             return
+        from backend.builds_data import spell_entry
+        e = spell_entry(spell)
+        if e and any(x.get("effectId") in (33, 71) for x in e.get("effects") or []):
+            # pet summon: without a "/pet leader" mapping the pet's damage
+            # credits an ally row instead of the player
+            own = any(o.lower() == (tracker.name or "").lower()
+                      for o in tracker.pet_owners.values())
+            if not own:
+                tracker.pet_hint = True
+            return  # a summon is never a loadout-mismatch signal either
         from backend.game_data import is_travel_ritual
         if await is_travel_ritual(spell):
             return  # rituals (rings/circles/gate...) are castable by ANY

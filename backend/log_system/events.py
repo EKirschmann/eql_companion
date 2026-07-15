@@ -153,6 +153,16 @@ class OtherDamageOut(LogEvent):
     source: str  # melee verb or spell name
 
 
+class OtherHeal(LogEvent):
+    """<Healer> healed <target>[ over time] for N [(M)] hit points by <Spell>."""
+    type: str = "other_heal"
+    healer: str
+    target: str
+    amount: int
+    spell: str
+    over_time: bool = False
+
+
 class MissIn(LogEvent):
     """<attacker> tries to <verb> YOU, but misses / YOU block|dodge|...!"""
     type: str = "miss_in"
