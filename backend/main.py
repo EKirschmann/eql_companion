@@ -280,6 +280,14 @@ async def _load_exalt_effects() -> None:
             m = re.search(r"Effect: ([^(;|]+)", line or "")
             if m:
                 names.add(m.group(1).strip().lower())
+        # stones whose effect is ALSO a scribed spell (Drones of Doom etc.)
+        # stay unlabeled: a cast and a proc are indistinguishable in the log,
+        # and mislabeling real casts is the worse error
+        book = load_spellbook(tracker.name, tracker.server)
+        if book:
+            scribed = {s["name"].lower() for s in book.get("castable", [])}
+            scribed |= {n.lower() for n in book.get("other_loadouts") or []}
+            names -= scribed
         tracker.exalt_effects = names
         if names:
             logger.info("Exaltation proc effects: %s", ", ".join(sorted(names)))
