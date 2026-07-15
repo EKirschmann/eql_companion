@@ -303,7 +303,15 @@ export interface GearExalt {
   why: string;
 }
 
+export interface PetHand {
+  item: string;
+  why: string;
+  where?: string;
+}
+
 export interface GearAdvice {
+  stale?: boolean;
+  pet_hand?: PetHand[];
   source: "llm" | "builtin";
   generated: string;
   note: string | null;
@@ -315,6 +323,7 @@ export interface GearAdvice {
 }
 
 export interface Advice {
+  stale?: boolean;
   purchase?: PurchaseItem[];
   source: "llm" | "builtin";
   grounding: "wiki" | "memory";

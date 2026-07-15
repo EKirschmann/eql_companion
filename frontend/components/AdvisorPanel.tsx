@@ -465,6 +465,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
         )}
         {advice && (
           <>
+            {advice.stale && (
+              <div className="adv-stale">
+                Saved counsel from {advice.generated?.replace("T", " ") ?? "earlier"} — your
+                level, zone, or exports have changed since. Consult to refresh.
+              </div>
+            )}
             {advice.note && <div className="adv-note">{advice.note}</div>}
 
             {advice.loadout.length + advice.nice_to_have.length > 0 && (
@@ -674,6 +680,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   {gearLoading ? "consulting…" : gear ? "re-consult gear" : "consult gear"}
                 </button>
               </h3>
+              {gear?.stale && (
+                <div className="adv-stale">
+                  Saved gear counsel from {gear.generated?.replace("T", " ") ?? "earlier"} —
+                  context changed since. Re-consult to refresh.
+                </div>
+              )}
               {gear?.note && <div className="adv-note">{gear.note}</div>}
               {gear && gear.slots.length > 0 && (
                 <table className="adv-table">
@@ -719,6 +731,23 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                         {x.move_to && <> → <strong>{x.move_to}</strong></>}
                         <br />
                         {x.why}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {gear && (gear.pet_hand?.length ?? 0) > 0 && (
+                <>
+                  <div className="adv-sub" style={{ marginTop: 10 }}>
+                    Hand to pet — destroyed when the pet dies; cheap spares only
+                  </div>
+                  <ul className="adv-list">
+                    {gear.pet_hand!.map((p) => (
+                      <li key={p.item}>
+                        <strong>{p.item}</strong>
+                        {p.where && <span className="adv-cls"> ({p.where})</span>}
+                        <br />
+                        {p.why}
                       </li>
                     ))}
                   </ul>

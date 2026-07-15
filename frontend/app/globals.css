@@ -1623,3 +1623,11 @@ button.app-version:hover { color: var(--gold-bright); }
   color: var(--ink-dim, rgba(230, 222, 202, 0.55));
   font-size: 11px;
 }
+
+.adv-stale {
+  font-size: 12px;
+  color: var(--gold);
+  border: 1px solid var(--hairline-dim);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}

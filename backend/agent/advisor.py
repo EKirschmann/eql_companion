@@ -583,7 +583,7 @@ async def _builtin_gear(ctx: dict) -> dict:
                 "cross-item stat comparisons and farming targets need a "
                 "model from the Counsel selector.",
         "slots": _full_slot_table(recs, worn),
-        "farm": [], "exaltations": exalts, "unknown": [],
+        "farm": [], "exaltations": exalts, "unknown": [], "pet_hand": [],
     }
 
 
@@ -802,12 +802,15 @@ __GEAR__
 EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
 __EXALTS__
 
+PET HANDOFF (only when the trio has a pet class): pets equip items HANDED to them — weapons boost their damage (procs work), armor their AC. Handed items are DESTROYED when the pet dies or repops, so only ever suggest cheap unused duplicates from bags/bank (looted Fine Steel etc.) — never worn gear, never upgrade fodder (+N ranks), never exaltation hosts. Mark uncertainty where EQL may differ from classic.
+
 Reply with ONLY a JSON object (no fences, no prose):
 {
   "note": "one-sentence overall read of their gearing, or null",
   "slots": [{"slot": "Chest", "current": "...", "recommend": "...", "why": "..."}],
   "farm": [{"item": "...", "slot": "...", "zone": "...", "source": "...", "why": "..."}],
-  "exaltations": [{"name": "...", "move_to": "...", "why": "..."}]
+  "exaltations": [{"name": "...", "move_to": "...", "why": "..."}],
+  "pet_hand": [{"item": "...", "why": "..."}]
 }
 
 Rules:
@@ -902,7 +905,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
         return {**base, "source": "builtin", "note":
                 "No inventory export found — type /outputfile inventory "
                 "in-game, then press check exports.",
-                "slots": [], "farm": [], "exaltations": [], "unknown": []}
+                "slots": [], "farm": [], "exaltations": [], "pet_hand": [], "unknown": [], "pet_hand": []}
     if llm_active()["provider"] == "none":
         return {**base, **(await _builtin_gear(ctx))}
     classes = [x.strip() for x in (ctx.get("class_str") or "").split("/")
@@ -964,7 +967,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
             pass
         return {**base, "source": "builtin",
                 "note": f"Live gear counsel needs the LLM ({str(e)[:60]}).",
-                "slots": [], "farm": [], "exaltations": [],
+                "slots": [], "farm": [], "exaltations": [], "pet_hand": [],
                 "unknown": gear["unknown"][:10]}
 
     from backend.game_data import item_line as _item_line
@@ -1020,8 +1023,25 @@ async def generate_gear_advice(ctx: dict) -> dict:
             if len(slots) != before:
                 logger.info("Dropped secondary slot rec — 2H primary "
                             "recommendation occupies both hands")
+    pet_hand = []
+    exalt_hosts = {(x.get("host") or "").lower()
+                   for x in (ctx.get("exaltations") or [])}
+    owned_locs = {}
+    for it in items:
+        owned_locs.setdefault(it["name"].lower(), it.get("where"))
+    for ph in _clean_list(data.get("pet_hand"), ("item", "why"),
+                          cap=4, require="item"):
+        low = ph["item"].lower()
+        where = owned_locs.get(low)
+        if (where in ("bags", "bank") and _item_rank(ph["item"]) == 0
+                and low not in exalt_hosts):
+            ph["where"] = where
+            pet_hand.append(ph)
+        else:
+            logger.info("Dropped pet-hand rec: %s (%s)", ph["item"], where)
     return {**base, "source": "llm",
             "note": data.get("note"),
+            "pet_hand": pet_hand,
             "slots": _full_slot_table(slots, ctx.get("worn")),
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),

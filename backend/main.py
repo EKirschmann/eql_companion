@@ -859,8 +859,13 @@ async def get_advisor(refresh: bool = False, cached: bool = False):
            miss_sig["updated"] if miss_sig else None)
     sig = _sig_norm(sig)
     if _advice_cache is not None and _advice_sig == sig and not refresh:
-        return _advice_cache
+        return {**_advice_cache, "stale": False}
     if cached:
+        # serve the last counsel even when the context moved on (zone/level/
+        # exports) — marked stale so the tab can offer a reconsult instead
+        # of forcing one
+        if _advice_cache is not None:
+            return {**_advice_cache, "stale": True}
         return {"cached": False}
     ctx = {
         "name": tracker.name, "race": tracker.race,
@@ -907,8 +912,10 @@ async def get_gear(refresh: bool = False, cached: bool = False):
            inv["updated"] if inv else None)
     sig = _sig_norm(sig)
     if _gear_cache is not None and _gear_sig == sig and not refresh:
-        return _gear_cache
+        return {**_gear_cache, "stale": False}
     if cached:
+        if _gear_cache is not None:
+            return {**_gear_cache, "stale": True}
         return {"cached": False}
     ctx = {"class_str": tracker.class_str, "level": tracker.level,
            "race": tracker.race, "playstyle": tracker.playstyle,
