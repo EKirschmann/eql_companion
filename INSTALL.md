@@ -4,21 +4,7 @@ No experience needed. You do NOT need git, GitHub knowledge, or anything a
 programmer uses — just two free installs and a ZIP file. Total time: about
 ten minutes, most of it watching progress bars.
 
-## Step 1 — Install Python (one time)
-
-1. Go to <https://www.python.org/downloads/> and click the big yellow
-   **Download Python** button.
-2. Run the file it downloads. **IMPORTANT: on the first screen, tick the
-   checkbox that says "Add python.exe to PATH"** (bottom of the window) —
-   this is the one step people miss.
-3. Click **Install Now** and let it finish.
-
-## Step 2 — Install Node.js (one time)
-
-1. Go to <https://nodejs.org/> and download the **LTS** version.
-2. Run it. Next → Next → Finish. No checkboxes to worry about.
-
-## Step 3 — Download the companion
+## Step 1 — Download the companion
 
 1. Go to <https://github.com/EKirschmann/eql_companion>.
 2. Click the green **<> Code** button → **Download ZIP**.
@@ -27,13 +13,18 @@ ten minutes, most of it watching progress bars.
    **Do not skip extracting** — opening the ZIP and double-clicking inside
    it will not work.
 
-## Step 4 — Run the installer
+## Step 2 — Run the installer
 
 1. Open the extracted folder and double-click **install_companion.bat**.
    - If Windows shows a blue "protected your PC" box: click **More info**,
      then **Run anyway**. (It is a plain script — you can open it in
      Notepad and read it.)
-2. It installs the app's pieces (a few minutes), then asks a few questions:
+2. If Python or Node.js are missing, it **offers to install them for you**
+   — just press **Y**. (If that fails on your PC, install them yourself:
+   Python from <https://www.python.org/downloads/> — tick **"Add
+   python.exe to PATH"** on the first screen — and the LTS version from
+   <https://nodejs.org/> — then run the installer again.)
+3. It installs the app's pieces (a few minutes), then asks a few questions:
    - It finds your EverQuest Legends folder by itself on most PCs — press
      **Enter** to accept.
    - It offers to download the community map pack — say **y**.
@@ -41,7 +32,7 @@ ten minutes, most of it watching progress bars.
      one; you can change this later inside the app.
 3. When it offers to launch — say yes. A browser tab opens with your HUD.
 
-## Step 5 — In the game (once per character)
+## Step 3 — In the game (once per character)
 
 Type these in the EQL chat box:
 
@@ -65,7 +56,7 @@ also run: `/outputfile spellbook`, `/outputfile inventory`,
 
 | Symptom | Fix |
 |---|---|
-| "python is not recognized" | Re-run the Python installer, tick **Add python.exe to PATH**, then run install_companion.bat again |
-| The window flashes and closes instantly | You ran it from inside the ZIP — extract first (Step 3.3) |
+| "python is not recognized" | Say **Y** when the installer offers to install Python — or install it yourself with the **Add python.exe to PATH** box ticked |
+| Nothing seems to happen | Make sure you extracted the ZIP first (Step 1.3) — the installer window always stays open now, so read what it says |
 | "game not found" in the wizard | Paste the folder that contains `eqgame.exe` when it asks |
 | App opens but everything says waiting | Type `/log on` in game — the companion reads your combat log |
