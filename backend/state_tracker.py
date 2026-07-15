@@ -105,6 +105,9 @@ class CharacterTracker:
         self.pet_hint = False
         # session persistence writes only when something changed
         self._dirty = True
+        # lowercase effect names granted by owned exaltation stones — damage
+        # "by <one of these>" is a proc, labeled "(exaltation)" in the parse
+        self.exalt_effects: set = set()
 
     def _touch_encounter(self, ts: datetime) -> None:
         if (self.encounter is None or
@@ -127,6 +130,13 @@ class CharacterTracker:
                 mob, {"kills": 0, "xp_percent": 0.0, "loots": []},
             )["xp_percent"] += self._pending_xp[1]
         self._pending_xp = None
+
+    def _fx_label(self, spell: str) -> str:
+        """Exaltation procs share the spell-damage line shape — the effect
+        name gives them away."""
+        if spell and spell.lower() in self.exalt_effects:
+            return f"{spell} (exaltation)"
+        return spell
 
     def _encounter_heal(self, ts: datetime, label: str, amount: int) -> None:
         enc = self.encounter
@@ -233,9 +243,11 @@ class CharacterTracker:
                     self._encounter_ability(e.ts, e.verb.capitalize(), "melee",
                                             e.damage, e.target)
                 elif isinstance(e, ev.SpellDamageOut):
-                    self._encounter_ability(e.ts, e.spell, "spell", e.damage, e.target)
+                    self._encounter_ability(e.ts, self._fx_label(e.spell),
+                                            "spell", e.damage, e.target)
                 else:  # DotDamage
-                    self._encounter_ability(e.ts, e.spell, "dot", e.damage, e.target)
+                    self._encounter_ability(e.ts, self._fx_label(e.spell),
+                                            "dot", e.damage, e.target)
             elif isinstance(e, ev.MissOut):
                 self.swings_missed += 1
             elif isinstance(e, ev.OtherDamageOut):

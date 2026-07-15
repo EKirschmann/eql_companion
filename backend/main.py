@@ -202,6 +202,7 @@ async def switch_character(file_name: str) -> bool:
     if ocr_watcher:
         ocr_watcher.tracker = tracker
     _advice_cache = _advice_sig = None
+    asyncio.create_task(_load_exalt_effects())
     await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
     logger.info(f"Switched to {tracker.name} ({tracker.server})")
     return True
@@ -264,6 +265,26 @@ async def _check_cast(spell: str) -> None:
             await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
     except Exception:
         logger.exception("Cast/loadout check failed")
+
+
+async def _load_exalt_effects() -> None:
+    """Effect names granted by owned exaltation stones (wiki-mined, cached)
+    — the tracker labels matching damage lines "(exaltation)"."""
+    try:
+        from backend.game_data import item_line
+        inv = load_export(tracker.name, tracker.server, "Inventory")
+        names = set()
+        for x in (inv or {}).get("exaltations") or []:
+            bname = re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip()
+            line = await item_line(bname)
+            m = re.search(r"Effect: ([^(;|]+)", line or "")
+            if m:
+                names.add(m.group(1).strip().lower())
+        tracker.exalt_effects = names
+        if names:
+            logger.info("Exaltation proc effects: %s", ", ".join(sorted(names)))
+    except Exception:
+        logger.exception("Exaltation-effect load failed")
 
 
 async def on_log_event(event: ev.LogEvent, live: bool) -> None:
@@ -464,6 +485,7 @@ async def lifespan(app: FastAPI):
             f"No EQL log found in {settings.eql_log_dir} — running without live data")
 
     _load_advice_cache()  # consults survive restarts
+    tasks.append(asyncio.create_task(_load_exalt_effects()))
     ocr_watcher = OcrWatcher(tracker, ws_manager)
     tasks.append(asyncio.create_task(ocr_watcher.run()))
     tasks.append(asyncio.create_task(event_flush_loop()))
@@ -609,6 +631,7 @@ async def refresh_exports():
     """Fresh directory scan — the 'check exports' button after running the
     in-game macro (/outputfile achievements|inventory|missingspells|spellbook)."""
     clear_find_cache()
+    asyncio.create_task(_load_exalt_effects())
     return exports_status(tracker.name, tracker.server)
 
 
