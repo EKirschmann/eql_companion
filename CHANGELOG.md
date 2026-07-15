@@ -4,6 +4,13 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.5.2 — 2026-07-14
+
+- OCR on Python 3.13 actually works now: the rapidocr v2 engine needs the
+  onnxruntime package installed separately (CPU package — no graphics
+  card requirement) and it was missing from the requirements. Update and
+  the calibrator's "onnxruntime is not installed" error goes away.
+
 ## v1.5.1 — 2026-07-14
 
 - Fixed installs failing on Python 3.13: the OCR engine package now

@@ -53,7 +53,13 @@ def _get_engine():
     """RapidOCR loads its ONNX models on first use (~1s) — do it lazily."""
     global _engine
     if _engine is None:
-        _engine = RapidOCR()
+        try:
+            _engine = RapidOCR()
+        except Exception as e:
+            raise RuntimeError(
+                "OCR engine failed to start "
+                f"({str(e)[:80]}) — run update_companion.bat to refresh "
+                "dependencies (needs the onnxruntime package)") from e
     return _engine
 
 RE_X = re.compile(r"X\s*[:;.,]?\s*(-?\d+)", re.IGNORECASE)
