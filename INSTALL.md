@@ -57,9 +57,9 @@ also run: `/outputfile spellbook`, `/outputfile inventory`,
 
 - Start it with **start_companion.bat** (make a shortcut if you like).
 - Click the **version number** in the app header to check for updates.
-- To update a ZIP install: download the ZIP again and extract it over the
-  same folder — your settings (`.env`) and data are untouched because the
-  new ZIP doesn't contain those files.
+- To update: double-click **update_companion.bat** — it downloads the
+  newest version itself and never touches your settings or data. (No git
+  or anything else needed.)
 
 ## If something goes wrong
 
