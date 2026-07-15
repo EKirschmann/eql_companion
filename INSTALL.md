@@ -6,8 +6,8 @@ ten minutes, most of it watching progress bars.
 
 ## Step 1 — Download the companion
 
-1. Go to <https://github.com/EKirschmann/eql_companion>.
-2. Click the green **<> Code** button → **Download ZIP**.
+1. Go to <https://github.com/EKirschmann/eql_companion/releases> and,
+   under the newest version at the top, download **Source code (zip)**.
 3. Find the ZIP in your Downloads, **right-click it → Extract All…** and
    put it somewhere easy, like `Documents\eql_companion`.
    **Do not skip extracting** — opening the ZIP and double-clicking inside

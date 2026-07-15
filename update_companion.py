@@ -15,9 +15,29 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import json
+
 ROOT = Path(__file__).resolve().parent
 REPO = "EKirschmann/eql_companion"
-ZIP_URL = f"https://github.com/{REPO}/archive/refs/heads/main.zip"
+FALLBACK_ZIP = f"https://github.com/{REPO}/archive/refs/heads/main.zip"
+
+
+def latest_tag() -> str | None:
+    """Newest release tag (semver max) — updates track RELEASES, not
+    whatever is mid-development on main."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{REPO}/tags?per_page=30",
+            headers={"User-Agent": "eql-companion-updater"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            tags = json.loads(r.read())
+        names = [str(t.get("name", "")) for t in tags]
+        def ver(v):
+            import re
+            return tuple(int(x) for x in re.findall(r"[0-9]+", v)[:3]) or (0,)
+        return max((n for n in names if n), key=ver, default=None)
+    except Exception:
+        return None
 
 # never touched by the updater — user state and heavy build artifacts
 PRESERVE = {".env", ".env.bak", "data", "node_modules", ".next", ".git",
@@ -32,8 +52,11 @@ def say(t=""):
 
 
 def download() -> zipfile.ZipFile:
-    say(f"Downloading the latest version from github.com/{REPO} ...")
-    req = urllib.request.Request(ZIP_URL, headers={"User-Agent": "eql-companion-updater"})
+    tag = latest_tag()
+    url = (f"https://github.com/{REPO}/archive/refs/tags/{tag}.zip"
+           if tag else FALLBACK_ZIP)
+    say(f"Downloading {tag or 'the latest code'} from github.com/{REPO} ...")
+    req = urllib.request.Request(url, headers={"User-Agent": "eql-companion-updater"})
     with urllib.request.urlopen(req, timeout=120) as r:
         data = r.read()
     say(f"  {len(data) // 1024} KB received")

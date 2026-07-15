@@ -62,6 +62,10 @@ cd eql_companion
 install_companion.bat
 ```
 
+No git? Download the newest **Source code (zip)** from the
+[releases page](https://github.com/EKirschmann/eql_companion/releases),
+extract, run `install_companion.bat`.
+
 The installer pulls dependencies, then a short wizard finds your EverQuest
 Legends install (scans all drives; or paste the path), offers to download
 the [Brewall map pack](https://www.eqmaps.info/eq-map-files/) for the 2D
