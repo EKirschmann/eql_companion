@@ -480,7 +480,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.5.2"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.5.3"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -773,22 +773,48 @@ def _parse_ver(v: str) -> tuple:
 async def update_check():
     """Compare the running version against the newest GitHub tag. On-demand
     (the version badge in the header triggers it) — never automatic."""
+    import ssl
     import urllib.request
 
-    def fetch():
+    def _ctx():
+        try:
+            import certifi
+            return ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            return ssl.create_default_context()
+
+    def fetch_api():
         req = urllib.request.Request(
             f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=30",
             headers={"User-Agent": "eql-companion", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read())
-    try:
-        tags = await asyncio.to_thread(fetch)
-        # the tags API guarantees no ordering — take the semver max
-        names = [str(t.get("name", "")).lstrip("v") for t in tags]
-        latest = max((n for n in names if n), key=_parse_ver, default=None)
-    except Exception as e:
+        with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+            return [str(t.get("name", "")).lstrip("v")
+                    for t in json.loads(r.read())]
+
+    def fetch_page():
+        # no-API fallback: the public tags page. Unauthenticated API calls
+        # are capped at 60/hour PER IP — guildmates behind shared IPs hit
+        # 403s the plain website never imposes.
+        req = urllib.request.Request(
+            f"https://github.com/{GITHUB_REPO}/tags",
+            headers={"User-Agent": "eql-companion"})
+        with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+            html = r.read().decode("utf-8", "replace")
+        return [m.lstrip("v") for m in
+                re.findall(rf"/{GITHUB_REPO}/releases/tag/v?([0-9.]+)", html)]
+    latest = None
+    err = None
+    for fetch in (fetch_api, fetch_page):
+        try:
+            names = await asyncio.to_thread(fetch)
+            latest = max((n for n in names if n), key=_parse_ver, default=None)
+            if latest:
+                break
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:120]}"
+    if latest is None:
         return {"current": APP_VERSION, "latest": None,
-                "error": f"could not reach GitHub ({type(e).__name__})"}
+                "error": f"could not reach GitHub ({err or 'no tags found'})"}
     newer = latest is not None and _parse_ver(latest) > _parse_ver(APP_VERSION)
     return {"current": APP_VERSION, "latest": latest, "update_available": newer,
             "how": "close the companion and run update_companion.bat" if newer else None}

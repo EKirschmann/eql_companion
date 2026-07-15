@@ -9,11 +9,38 @@ requirement) does everything. Run via update_companion.bat, or directly:
     python update_companion.py [--no-deps]
 """
 import io
+import ssl
 import subprocess
 import sys
 import urllib.request
 import zipfile
 from pathlib import Path
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """certifi's CA bundle when available — some Windows Pythons (and
+    antivirus HTTPS scanning) can't validate GitHub with the default store.
+    Verification is NEVER disabled: this downloads code."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def _open(req, timeout):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout,
+                                      context=_ssl_context())
+    except urllib.error.URLError as e:
+        if "CERTIFICATE_VERIFY_FAILED" in str(e):
+            raise RuntimeError(
+                "your PC's certificate store is blocking Python's HTTPS "
+                "(often antivirus HTTPS-scanning). Fix: open this window's "
+                "folder in a terminal and run   pip install certifi   then "
+                "run the updater again — or download the ZIP in your "
+                "browser from github.com/" + REPO + "/releases") from e
+        raise
 
 import json
 
@@ -24,20 +51,37 @@ FALLBACK_ZIP = f"https://github.com/{REPO}/archive/refs/heads/main.zip"
 
 def latest_tag() -> str | None:
     """Newest release tag (semver max) — updates track RELEASES, not
-    whatever is mid-development on main."""
-    try:
+    whatever is mid-development on main. API first, plain tags page as a
+    fallback (the API rate-limits shared IPs; the website does not)."""
+    import re
+
+    def ver(v):
+        return tuple(int(x) for x in re.findall(r"[0-9]+", v)[:3]) or (0,)
+
+    def from_api():
         req = urllib.request.Request(
             f"https://api.github.com/repos/{REPO}/tags?per_page=30",
             headers={"User-Agent": "eql-companion-updater"})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            tags = json.loads(r.read())
-        names = [str(t.get("name", "")) for t in tags]
-        def ver(v):
-            import re
-            return tuple(int(x) for x in re.findall(r"[0-9]+", v)[:3]) or (0,)
-        return max((n for n in names if n), key=ver, default=None)
-    except Exception:
-        return None
+        with _open(req, 20) as r:
+            return [str(t.get("name", "")) for t in json.loads(r.read())]
+
+    def from_page():
+        req = urllib.request.Request(
+            f"https://github.com/{REPO}/tags",
+            headers={"User-Agent": "eql-companion-updater"})
+        with _open(req, 20) as r:
+            html = r.read().decode("utf-8", "replace")
+        return re.findall(rf"/{REPO}/releases/tag/(v[0-9.]+)", html)
+
+    for source in (from_api, from_page):
+        try:
+            names = source()
+            best = max((n for n in names if n), key=ver, default=None)
+            if best:
+                return best
+        except Exception:
+            continue
+    return None
 
 # never touched by the updater — user state and heavy build artifacts
 PRESERVE = {".env", ".env.bak", "data", "node_modules", ".next", ".git",
@@ -57,7 +101,7 @@ def download() -> zipfile.ZipFile:
            if tag else FALLBACK_ZIP)
     say(f"Downloading {tag or 'the latest code'} from github.com/{REPO} ...")
     req = urllib.request.Request(url, headers={"User-Agent": "eql-companion-updater"})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with _open(req, 120) as r:
         data = r.read()
     say(f"  {len(data) // 1024} KB received")
     return zipfile.ZipFile(io.BytesIO(data))

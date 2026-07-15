@@ -53,10 +53,19 @@ class _TextExtract(HTMLParser):
         return "\n".join(out).strip()
 
 
+def _ssl_ctx():
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _get(params: dict) -> dict:
     url = API + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "eql-companion"})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
         return json.loads(r.read().decode("utf-8"))
 
 

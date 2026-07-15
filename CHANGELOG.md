@@ -4,6 +4,16 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.5.3 — 2026-07-14
+
+- Fixed "CERTIFICATE_VERIFY_FAILED" when checking or downloading updates:
+  Python now validates GitHub with the bundled certifi certificate store
+  (some Windows Pythons and antivirus HTTPS-scanning break the default
+  one). If you are already stuck on it: run `pip install certifi` once,
+  or download the ZIP in your browser — then updates work normally.
+- Update checks fall back to the plain GitHub website when the API is
+  rate-limited (shared IPs), and error messages show the real cause.
+
 ## v1.5.2 — 2026-07-14
 
 - OCR on Python 3.13 actually works now: the rapidocr v2 engine needs the
