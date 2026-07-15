@@ -719,7 +719,10 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                       <tr
                         key={s.slot + (s.recommend ?? "")}
                         data-dim={
-                          !s.why || s.why.startsWith("keep —") || s.why.startsWith("empty —")
+                          !s.why ||
+                          s.why.startsWith("keep —") ||
+                          s.why.startsWith("empty —") ||
+                          (s.recommend != null && s.recommend === s.current)
                             ? "1"
                             : undefined
                         }

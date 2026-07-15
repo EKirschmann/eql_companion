@@ -913,21 +913,36 @@ async def generate_gear_advice(ctx: dict) -> dict:
     gear = await build_gear_context(items, classes)
     exalts = ctx.get("exaltations") or []
     exalt_lines = []
+    unusable_exalts = set()
+    from backend.game_data import _trio_usable, item_line as _gd_item_line
     for x in exalts:
         bname = re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip()
+        eff = None
+        usable = None
         try:
-            eff = await _exalt_effect(bname)
+            full_line = await _gd_item_line(bname)
+            if full_line:
+                m2 = re.search(r"Effect: [^;|]+", full_line)
+                eff = m2.group(0) if m2 else "no listed effect (stat stone?)"
+                usable = _trio_usable(full_line, classes)
         except Exception:
-            eff = None
+            pass
         host = (f"socketed in {x['host']} ({x['host_loc']})" if x.get("host")
                 else f"loose in the {x['where']}")
         styp = _exalt_socket_type(eff)
         fits = ("weapon sockets only (Primary/Secondary/Range)"
                 if styp == "proc" else f"{styp} sockets"
                 if styp != "unknown" else "unknown socket type")
+        if usable is False:
+            # the stone keeps its base item's class restriction — no one in
+            # this trio can use its effect at all
+            unusable_exalts.add(x["name"].lower())
+            cls_tag = " — [NOT USABLE by this trio: base item's class list excludes all three — bank fodder, never recommend moving it]"
+        else:
+            cls_tag = ""
         exalt_lines.append(f"{x['name']} — {host}"
                            + (f" — grants {eff}" if eff else "")
-                           + f" — type: {styp} (fits {fits})")
+                           + f" — type: {styp} (fits {fits}){cls_tag}")
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 
@@ -1064,7 +1079,11 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),
                                 cap=8, require="item"),
-            "exaltations": _clean_list(data.get("exaltations"),
-                                       ("name", "move_to", "why"),
-                                       cap=8, require="name"),
+            "exaltations": [x for x in _clean_list(
+                                data.get("exaltations"),
+                                ("name", "move_to", "why"),
+                                cap=8, require="name")
+                            if x["name"].lower() not in unusable_exalts
+                            and x["name"].lower() + " (exaltation)"
+                                not in unusable_exalts],
             "unknown": gear["unknown"][:10]}
