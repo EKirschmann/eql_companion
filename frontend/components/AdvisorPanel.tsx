@@ -744,8 +744,8 @@ export const AdvisorPanel = memo(function AdvisorPanel({
               {gear && gear.exaltations.length > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Exaltations you own (moving stones between sockets is a
-                    manual in-game choice)
+                    Exaltations you own (can-socket-into is computed from the
+                    class/slot rules; the actual move is done in-game)
                   </div>
                   <ul className="adv-list">
                     {gear.exaltations.map((x) => (
@@ -754,6 +754,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                         {x.where && <span className="adv-cls"> — {x.where}</span>}
                         <br />
                         {x.why}
+                        {x.move_to && (
+                          <>
+                            <br />
+                            <span className="adv-cls">can socket into: {x.move_to}</span>
+                          </>
+                        )}
                       </li>
                     ))}
                   </ul>

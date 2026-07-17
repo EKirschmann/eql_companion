@@ -996,6 +996,58 @@ def _full_slot_table(slots: List[dict], worn: Optional[dict]) -> List[dict]:
     return out
 
 
+async def _item_meta(name: str) -> Optional[dict]:
+    """{classes:set|None(ALL), slots:set, is_weapon, is_2h} from the wiki
+    Slot/Skill/Class lines — None if no page."""
+    from backend.game_data import item_line as _il
+    line = await _il(_item_base(name))
+    if not line:
+        return None
+    cm = re.search(r"Class: ([A-Z ]+)", line)
+    classes = None if (cm and "ALL" in cm.group(1).split()) else (
+        set(cm.group(1).split()) if cm else set())
+    sm = re.search(r"Slot: ([A-Z ]+)", line)
+    slots = set(sm.group(1).split()) if sm else set()
+    skm = re.search(r"Skill: ([12]H|1H|2H)?", line)
+    is_weapon = "Skill:" in line and bool(re.search(r"Skill: [12]H|Skill: H2H", line))
+    is_2h = bool(re.search(r"Skill: 2H", line))
+    return {"classes": classes, "slots": slots,
+            "is_weapon": is_weapon, "is_2h": is_2h}
+
+
+def _class_overlap(a, b) -> bool:
+    if a is None or b is None:   # None == ALL
+        return True
+    return bool(a & b) if (a and b) else False
+
+
+async def _exalt_targets(stone_name: str, styp: str,
+                         candidates: List[str]) -> List[str]:
+    """Owned items this stone can legally socket into (eqlwiki rules):
+    proc -> shared class + weapon (2H proc -> Primary only); focus/clicky/
+    worn -> shared class + same slot. Source item = the stone's own name."""
+    src = await _item_meta(re.sub(r"\s*[(]Exaltation[)]$", "", stone_name).strip())
+    if not src:
+        return []
+    out = []
+    for cand in candidates:
+        tgt = await _item_meta(cand)
+        if not tgt:
+            continue
+        if not _class_overlap(src["classes"], tgt["classes"]):
+            continue
+        if styp == "proc":
+            if not tgt["is_weapon"]:
+                continue
+            if src["is_2h"] and "PRIMARY" not in tgt["slots"]:
+                continue
+        else:  # focus / clicky / worn need a shared equipment slot
+            if not (src["slots"] & tgt["slots"]):
+                continue
+        out.append(cand)
+    return out
+
+
 async def generate_gear_advice(ctx: dict) -> dict:
     from backend.game_data import build_gear_context
 
@@ -1020,6 +1072,15 @@ async def generate_gear_advice(ctx: dict) -> dict:
     exalt_lines = []
     exalt_info = []
     unusable_exalts = set()
+    # distinct owned items a stone might socket into (worn + owned, deduped)
+    _cand_seen = set()
+    exalt_targets = []
+    for _nm in (list((ctx.get("worn") or {}).values())
+                + [it["name"] for it in (ctx.get("inventory_items") or [])]):
+        k = _item_base(_nm).lower()
+        if k and k not in _cand_seen:
+            _cand_seen.add(k)
+            exalt_targets.append(_nm)
     from backend.game_data import _trio_usable, item_line as _gd_item_line
     for x in exalts:
         bname = re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip()
@@ -1070,9 +1131,18 @@ async def generate_gear_advice(ctx: dict) -> dict:
             status = "stat stone"
         else:
             status = "active"
+        elig = []
+        if usable is not False and status != "stat stone":
+            try:
+                cur_host = _item_base(x.get("host") or "").lower()
+                elig = [t for t in await _exalt_targets(x["name"], styp, exalt_targets)
+                        if _item_base(t).lower() != cur_host]
+            except Exception:
+                elig = []
+        move = ", ".join(sorted({t for t in elig})[:6])
         exalt_info.append({
             "name": re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip(),
-            "move_to": "",
+            "move_to": move,
             "where": ("in " + x["host"] if x.get("host")
                       else f"loose in {x['where']}"),
             "why": (eff_txt + (f" — {status}" if status else "")).strip(" —")
