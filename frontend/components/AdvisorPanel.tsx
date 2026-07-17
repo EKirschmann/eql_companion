@@ -743,12 +743,15 @@ export const AdvisorPanel = memo(function AdvisorPanel({
               )}
               {gear && gear.exaltations.length > 0 && (
                 <>
-                  <div className="adv-sub" style={{ marginTop: 10 }}>Exaltations — socket moves</div>
+                  <div className="adv-sub" style={{ marginTop: 10 }}>
+                    Exaltations you own (moving stones between sockets is a
+                    manual in-game choice)
+                  </div>
                   <ul className="adv-list">
                     {gear.exaltations.map((x) => (
                       <li key={x.name}>
                         <strong>{x.name}</strong>
-                        {x.move_to && <> → <strong>{x.move_to}</strong></>}
+                        {x.where && <span className="adv-cls"> — {x.where}</span>}
                         <br />
                         {x.why}
                       </li>

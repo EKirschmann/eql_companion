@@ -301,6 +301,7 @@ export interface GearFarm {
 export interface GearExalt {
   name: string;
   move_to: string | null;
+  where?: string;
   why: string;
 }
 

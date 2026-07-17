@@ -153,7 +153,7 @@ def load_export(name: Optional[str], server: Optional[str],
         mtime = path.stat().st_mtime
     except OSError:
         return None
-    key = (str(path), mtime, kind, 4)  # bump on parser changes
+    key = (str(path), mtime, kind, 5)  # bump on parser changes
     hit = _export_cache.get(key)
     if hit is not None:
         return hit
@@ -178,21 +178,29 @@ def load_export(name: Optional[str], server: Optional[str],
         worn, items, exalts, count, seen_slots = {}, [], [], 0, {}
         last_item_at = {}
         sub_re = re.compile(r"^(.+?)-Slot(\d+)$")
+        current = None  # most-recent top-level item, to attach its sockets
         for line in text.splitlines():
             parts = line.split("\t")
             if len(parts) < 2 or parts[0].lower() == "location":
                 continue
             count += 1
             loc, item = parts[0].strip(), parts[1].strip()
-            if not item or item.lower() == "empty":
-                continue
+            empty = not item or item.lower() == "empty"
             m = sub_re.match(loc)
             if m:
                 parent = m.group(1)
+                slot_n = int(m.group(2))
                 in_bank = parent.lower().startswith("bank")
+                # socket NUMBER encodes socket TYPE: a stone only fits a host
+                # socket of the same number. Record every socket (empty too).
+                if current is not None and current["loc"] == parent:
+                    current.setdefault("sockets", {})[slot_n] = (
+                        None if empty else item)
+                if empty:
+                    continue
                 if "(exaltation)" in item.lower():
                     exalts.append({
-                        "name": item, "socket": int(m.group(2)),
+                        "name": item, "socket": slot_n,
                         "host_loc": parent,
                         "host": last_item_at.get(parent),
                         "where": ("worn" if parent in WORN_SLOTS
@@ -205,6 +213,9 @@ def load_export(name: Optional[str], server: Optional[str],
                               "where": "bank" if in_bank else "bags",
                               "name": item})
                 continue
+            if empty:
+                current = None
+                continue
             last_item_at[loc] = item
             if loc in WORN_SLOTS:
                 seen_slots[loc] = seen_slots.get(loc, 0) + 1
@@ -215,9 +226,19 @@ def load_export(name: Optional[str], server: Optional[str],
                 where = "bank"
             else:
                 where = "bags"
-            items.append({"loc": loc, "where": where, "name": item})
+            entry = {"loc": loc, "where": where, "name": item, "sockets": {}}
+            items.append(entry)
+            current = entry
         value["worn"] = worn
         value["items"] = items
+        # item name -> empty socket numbers (for exaltation move validation)
+        socket_avail: dict = {}
+        for it in items:
+            socks = it.get("sockets") or {}
+            if socks:
+                socket_avail[it["name"].lower()] = {
+                    n for n, v in socks.items() if v is None}
+        value["item_sockets"] = socket_avail
         value["exaltations"] = exalts
         value["count"] = count
     else:  # Achievements — structure unknown until a real export exists

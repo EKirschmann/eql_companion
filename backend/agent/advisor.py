@@ -603,8 +603,10 @@ async def _builtin_gear(ctx: dict) -> dict:
                                 f"(+{_item_rank(best['name'])} vs +{cr})",
                          "where": best["where"]})
     exalts = [{"name": x["name"], "move_to": "",
-               "why": (f"socketed in {x['host']} ({x['host_loc']})"
-                       if x.get("host") else f"loose in the {x['where']}")}
+               "where": ("in " + x["host"] if x.get("host")
+                         else f"loose in {x['where']}"),
+               "why": "owned exaltation stone (enable an LLM model for effect "
+                      "details)"}
               for x in (ctx.get("exaltations") or [])]
     return {
         "source": "builtin",
@@ -903,7 +905,7 @@ __CONTEXT__
 OWNED EQUIPMENT (from /outputfile inventory; [worn/bags/bank] shows where each lives; stats and drop sources are from the game's wiki):
 __GEAR__
 
-EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). A stone adds value to its host ONLY while its effect is USABLE by the trio AND its level requirement is met — when comparing items for a slot, count ACTIVE socketed stones as part of the host's value and DORMANT/unusable ones as zero. Item Effect lines follow the same rule: "at Level N" effects below the character's level are worth nothing yet. Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
+EXALTATIONS (socketable effect-stones extracted from items — for CONTEXT only; the app reports them separately, do NOT recommend moving them). A stone adds value to its host ONLY while its effect is USABLE by the trio AND its level requirement is met: when comparing items for a slot, count ACTIVE socketed stones as part of the host's value and DORMANT/unusable ones as zero. Item Effect lines follow the same rule — "at Level N" effects below the character's level are worth nothing yet.
 __EXALTS__
 
 __PET_BLOCK__
@@ -913,7 +915,6 @@ Reply with ONLY a JSON object (no fences, no prose):
   "note": "one-sentence overall read of their gearing, or null",
   "slots": [{"slot": "Chest", "current": "...", "recommend": "...", "why": "..."}],
   "farm": [{"item": "...", "slot": "...", "zone": "...", "source": "...", "why": "..."}],
-  "exaltations": [{"name": "...", "move_to": "...", "why": "..."}],
   "pet_gear": [{"item": "...", "slot": "...", "why": "..."}]
 }
 
@@ -995,43 +996,6 @@ def _full_slot_table(slots: List[dict], worn: Optional[dict]) -> List[dict]:
     return out
 
 
-async def _gate_exalt_moves(recs: List[dict], unusable: set,
-                            owned_exalts: List[dict],
-                            classes: List[str]) -> List[dict]:
-    """Drop moves for trio-unusable stones, moves to the stone's CURRENT
-    host (the export already says where each sits), and moves onto a host
-    the TRIO CANNOT EQUIP (a proc stone on a Druid-only staff is useless)."""
-    from backend.game_data import _trio_usable, item_line as _il
-    host_of = {}
-    for x in owned_exalts or []:
-        hb = _item_base(x.get("host") or "").lower()
-        for key in (x["name"].lower(),
-                    re.sub(r"\s*[(]exaltation[)]$", "", x["name"].lower()).strip()):
-            host_of[key] = hb
-    out = []
-    for r in recs:
-        low = r["name"].lower()
-        if low in unusable or f"{low} (exaltation)" in unusable:
-            continue
-        target = r.get("move_to")
-        cur = host_of.get(low) or host_of.get(f"{low} (exaltation)")
-        if cur and target and _item_base(target).lower() == cur:
-            logger.info("Dropped exaltation rec — %s already socketed in %s",
-                        r["name"], target)
-            continue
-        if target:
-            try:
-                tline = await _il(_item_base(target))
-            except Exception:
-                tline = None
-            if tline and _trio_usable(tline, classes) is False:
-                logger.info("Dropped exaltation rec — host %s not equippable "
-                            "by the trio", target)
-                continue
-        out.append(r)
-    return out
-
-
 async def generate_gear_advice(ctx: dict) -> dict:
     from backend.game_data import build_gear_context
 
@@ -1054,6 +1018,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
     gear = await build_gear_context(items, classes)
     exalts = ctx.get("exaltations") or []
     exalt_lines = []
+    exalt_info = []
     unusable_exalts = set()
     from backend.game_data import _trio_usable, item_line as _gd_item_line
     for x in exalts:
@@ -1094,6 +1059,25 @@ async def generate_gear_advice(ctx: dict) -> dict:
         exalt_lines.append(f"{x['name']} — {host}"
                            + (f" — grants {eff}" if eff else "")
                            + f" — type: {styp} (fits {fits}){lvl_tag}{cls_tag}")
+        # deterministic, informational (NOT a move prescription — socketing
+        # compatibility rules are not reliably derivable from our data)
+        eff_txt = re.sub(r"^Effect:\s*", "", eff or "").strip() if eff else ""
+        if usable is False:
+            status = "not usable by your classes"
+        elif lm and ctx.get("level") is not None and ctx["level"] < int(lm.group(1)):
+            status = f"dormant until L{lm.group(1)}"
+        elif eff and "no listed effect" in eff:
+            status = "stat stone"
+        else:
+            status = "active"
+        exalt_info.append({
+            "name": re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip(),
+            "move_to": "",
+            "where": ("in " + x["host"] if x.get("host")
+                      else f"loose in {x['where']}"),
+            "why": (eff_txt + (f" — {status}" if status else "")).strip(" —")
+                   or status,
+        })
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 
@@ -1256,9 +1240,5 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),
                                 cap=8, require="item"),
-            "exaltations": await _gate_exalt_moves(
-                _clean_list(data.get("exaltations"),
-                            ("name", "move_to", "why"),
-                            cap=8, require="name"),
-                unusable_exalts, exalts, classes),
+            "exaltations": exalt_info,
             "unknown": gear["unknown"][:10]}
