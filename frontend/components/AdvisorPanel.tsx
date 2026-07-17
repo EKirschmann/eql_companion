@@ -311,7 +311,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
         {items.map((a) => (
           <li key={a.name}>
             <strong>{a.name}</strong>
-            {a.cost != null && <span className="adv-cost">{a.cost} pts</span>}
+            {a.cost != null && <span className="adv-cost"> · {a.cost} pts</span>}
             <br />
             {a.reason}
           </li>

@@ -545,6 +545,32 @@ async def _compose_builtin(ctx, bycat, replaced, grounded_any,
     }
 
 
+_SLOT_TOKENS = {
+    "ear": "EAR", "wrist": "WRIST", "fingers": "FINGER", "range": "RANGE",
+    "primary": "PRIMARY", "secondary": "SECONDARY", "head": "HEAD",
+    "face": "FACE", "neck": "NECK", "shoulders": "SHOULDERS", "arms": "ARMS",
+    "back": "BACK", "hands": "HANDS", "chest": "CHEST", "legs": "LEGS",
+    "feet": "FEET", "waist": "WAIST", "ammo": "AMMO",
+}
+
+
+async def _fits_slot(item: str, slot: str) -> bool:
+    """Wiki Slot-line check: a Piercing dagger can't be a Range rec. Any
+    Slot / Held accept anything; items without slot data pass (the
+    unknown-stats guard keeps those honest)."""
+    low = slot.lower().strip()
+    low = re.sub(r"\s+\d+$", "", low)  # "ear 2" -> "ear"
+    token = _SLOT_TOKENS.get(low)
+    if token is None:
+        return True
+    from backend.game_data import item_line
+    line = await item_line(item)
+    m = re.search(r"Slot: ([A-Z ]+)", line or "")
+    if not m:
+        return True
+    return token in m.group(1).split()
+
+
 def _item_base(name: str) -> str:
     return re.sub(r"\s*[+]\d+$", "", name or "").strip()
 
@@ -589,6 +615,27 @@ async def _builtin_gear(ctx: dict) -> dict:
         "slots": _full_slot_table(recs, worn),
         "farm": [], "exaltations": exalts, "unknown": [], "pet_gear": [],
     }
+
+
+def _gate_aas(items: List[dict], owned: dict) -> List[dict]:
+    """Drop AA recommendations for ranks the character already owns (per
+    the /alternateadv list roster) — "Slay Undead rank 5" is noise when
+    ranks >= 5 are bought."""
+    if not owned:
+        return items
+    omap = {k.lower(): v for k, v in owned.items()}
+    out = []
+    for it in items:
+        name = str(it.get("name") or "")
+        m = re.search(r"^(.*?)[\s(]+ranks?\s*(\d+)\s*[)]?\s*$", name, re.I)
+        base = (m.group(1) if m else name).strip().rstrip("(").strip()
+        want = int(m.group(2)) if m else None
+        o = omap.get(base.lower())
+        if o and want is not None and (o.get("ranks") or 0) >= want:
+            logger.info("Dropped AA rec — rank already owned: %s", name)
+            continue
+        out.append(it)
+    return out
 
 
 async def generate_advice(ctx: dict) -> dict:
@@ -768,8 +815,12 @@ async def generate_advice(ctx: dict) -> dict:
             "nice_to_have": nice_to_have,
             "prebuffs": prebuffs,
             "replace": verified,
-            "aa_now": _clean_list(data.get("aa_now"), ("name", "cost", "reason"), cap=6),
-            "aa_save": _clean_list(data.get("aa_save"), ("name", "cost", "reason"), cap=4),
+            "aa_now": _gate_aas(
+                _clean_list(data.get("aa_now"), ("name", "cost", "reason"), cap=6),
+                ctx.get("owned_aas") or {}),
+            "aa_save": _gate_aas(
+                _clean_list(data.get("aa_save"), ("name", "cost", "reason"), cap=4),
+                ctx.get("owned_aas") or {}),
             "horizon": _clean_list(data.get("horizon"), ("level", "cls", "name", "reason"), cap=8),
             "locations": _gate_locations(
                 _clean_list(data.get("locations"), ("zone", "why", "notable"),
@@ -793,6 +844,7 @@ async def generate_advice(ctx: dict) -> dict:
 # --------------------------------------------------------------------- gear
 
 GEAR_PROMPT = """You are the equipment advisor inside an EverQuest Legends companion app. EQL is a reimagined pre-Kunark EverQuest. A character runs THREE classes, and gear is equippable when ANY ONE of those classes can use it — one match is enough, it stays equipped across class swaps. Each item below is pre-marked [USABLE] or [NOT USABLE by this trio]; NEVER re-derive class eligibility yourself and NEVER reject a [USABLE] item because some of the trio cannot use it.
+Recommend a TWO-HANDER for Primary ONLY when it beats the current primary AND secondary COMBINED — the off-hand goes empty — and say that comparison in the why.
 CRITICAL — upgrade ranks: the stats listed are the BASE (+0) values. EQL's +N upgrade system boosts stats enormously (a +2 helm can have 3-4x the base AC and large HP/resists the base lacks). When a worn item has a higher +N than a challenger, assume its real stats are far above the listing. Items marked STATS UNKNOWN have no data at all — NEVER invent their stats and NEVER recommend replacing them (you cannot make an honest comparison).
 
 Paired slots: "Ear 1"/"Ear 2", "Wrist 1"/"Wrist 2", "Fingers 1"/"Fingers 2", "Any Slot 1"/"Any Slot 2" hold TWO independent items each — treat each numbered slot separately and remember both currently-worn items of a pair are listed. The two "Any Slot"s are EQL's generic slots: ANY equippable item can sit there (weapons included) and its stats apply, so recommend the best owned items that don't fit elsewhere; also consider "Ammo" and "Held" if something owned is worth parking there.
@@ -892,6 +944,30 @@ def _full_slot_table(slots: List[dict], worn: Optional[dict]) -> List[dict]:
                                if cur else "empty — nothing owned equips here",
                         "where": "worn" if cur else None})
     out.extend(by.values())
+    return out
+
+
+def _gate_exalt_moves(recs: List[dict], unusable: set,
+                      owned_exalts: List[dict]) -> List[dict]:
+    """Drop moves for trio-unusable stones AND moves to the stone's CURRENT
+    host — the inventory export already says where every stone sits."""
+    host_of = {}
+    for x in owned_exalts or []:
+        hb = _item_base(x.get("host") or "").lower()
+        for key in (x["name"].lower(),
+                    re.sub(r"\s*[(]exaltation[)]$", "", x["name"].lower()).strip()):
+            host_of[key] = hb
+    out = []
+    for r in recs:
+        low = r["name"].lower()
+        if low in unusable or f"{low} (exaltation)" in unusable:
+            continue
+        cur = host_of.get(low) or host_of.get(f"{low} (exaltation)")
+        if cur and r.get("move_to") and _item_base(r["move_to"]).lower() == cur:
+            logger.info("Dropped exaltation rec — %s is already socketed "
+                        "in %s", r["name"], r["move_to"])
+            continue
+        out.append(r)
     return out
 
 
@@ -1035,6 +1111,10 @@ async def generate_gear_advice(ctx: dict) -> dict:
         if rec_base == cur_base and rec != cur and _rank(rec) <= _rank(cur):
             logger.info("Dropped %s rec — same item at equal/lower rank", s.get("slot"))
             continue
+        if rec and not await _fits_slot(rec, str(s.get("slot") or "")):
+            logger.info("Dropped %s rec — %s does not fit that slot",
+                        s.get("slot"), rec)
+            continue
         if rec and (rec in owned or rec_base in owned_base):
             wset = where_by_base.get(rec_base, set())
             s["where"] = ("bags" if "bags" in wset else
@@ -1076,18 +1156,31 @@ async def generate_gear_advice(ctx: dict) -> dict:
             pet_gear.append(ph)
         else:
             logger.info("Dropped pet-gear rec: %s (%s)", ph["item"], where)
+    table = _full_slot_table(slots, ctx.get("worn"))
+    prim = next((r for r in table if r["slot"] == "Primary"
+                 and r.get("recommend")), None)
+    if prim:
+        try:
+            pl = await _item_line(prim["recommend"])
+        except Exception:
+            pl = None
+        if pl and "Skill: 2H" in pl:
+            for r in table:
+                if r["slot"] == "Secondary":
+                    r["recommend"] = None
+                    r["where"] = None
+                    r["why"] = ("— freed by the recommended 2H primary "
+                                "(occupies both hands)")
     return {**base, "source": "llm",
             "note": data.get("note"),
             "pet_gear": pet_gear,
-            "slots": _full_slot_table(slots, ctx.get("worn")),
+            "slots": table,
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),
                                 cap=8, require="item"),
-            "exaltations": [x for x in _clean_list(
-                                data.get("exaltations"),
-                                ("name", "move_to", "why"),
-                                cap=8, require="name")
-                            if x["name"].lower() not in unusable_exalts
-                            and x["name"].lower() + " (exaltation)"
-                                not in unusable_exalts],
+            "exaltations": _gate_exalt_moves(
+                _clean_list(data.get("exaltations"),
+                            ("name", "move_to", "why"),
+                            cap=8, require="name"),
+                unusable_exalts, exalts),
             "unknown": gear["unknown"][:10]}
