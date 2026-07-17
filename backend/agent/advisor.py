@@ -876,7 +876,7 @@ __CONTEXT__
 OWNED EQUIPMENT (from /outputfile inventory; [worn/bags/bank] shows where each lives; stats and drop sources are from the game's wiki):
 __GEAR__
 
-EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
+EXALTATIONS (socketable effect-stones extracted from items; they grant the named item's effect and CAN BE MOVED between gear sockets). A stone adds value to its host ONLY while its effect is USABLE by the trio AND its level requirement is met — when comparing items for a slot, count ACTIVE socketed stones as part of the host's value and DORMANT/unusable ones as zero. Item Effect lines follow the same rule: "at Level N" effects below the character's level are worth nothing yet. Sockets are TYPED — focus / clicky / worn / proc (per eqlegendstools.com) — and a stone only fits a socket of its effect's type. Proc stones fit WEAPON sockets only (Primary/Secondary/Range). Each stone below carries its inferred type; recommend moves only between same-type sockets, and where a stone's type reads "unknown", say so instead of guessing:
 __EXALTS__
 
 __PET_BLOCK__
@@ -1041,9 +1041,19 @@ async def generate_gear_advice(ctx: dict) -> dict:
             cls_tag = " — [NOT USABLE by this trio: base item's class list excludes all three — bank fodder, never recommend moving it]"
         else:
             cls_tag = ""
+        lvl_tag = ""
+        lm = re.search(r"at Level (\d+)", eff or "")
+        if lm:
+            req = int(lm.group(1))
+            have = ctx.get("level")
+            if have is not None:
+                lvl_tag = (f" — ACTIVE (needs L{req}, they are L{have})"
+                           if have >= req else
+                           f" — DORMANT until L{req} (they are L{have}: "
+                           "worth ZERO right now)")
         exalt_lines.append(f"{x['name']} — {host}"
                            + (f" — grants {eff}" if eff else "")
-                           + f" — type: {styp} (fits {fits}){cls_tag}")
+                           + f" — type: {styp} (fits {fits}){lvl_tag}{cls_tag}")
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 
