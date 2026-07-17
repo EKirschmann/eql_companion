@@ -16,15 +16,22 @@ router, TypeScript, hand-rolled CSS) + WebSocket live feed + optional LLM.
 
 ## Running for development
 
+`start_companion.bat dev` — or by hand:
+
 ```
 uvicorn backend.main:app --reload      # backend :8000 (from the repo root)
 cd frontend && npm run dev             # UI :3000
 ```
 
+END USERS run production mode (`start_companion.bat` with no args): uvicorn
+WITHOUT --reload + `next start` serving the build from `.next-prod`
+(~350MB lighter, no file watchers). Production builds use a SEPARATE dist
+dir (`NEXT_DIST_DIR=.next-prod`), so a running dev server and a prod build
+can no longer corrupt each other.
+
 - `--reload` restarts on .py changes and re-reads `.env`; editing `.env`
   alone does NOT trigger a reload — touch a backend file or restart.
-- NEVER run `npm run build` while the dev server is running (it corrupts
-  `.next/`). Typecheck with `npx tsc --noEmit` instead.
+- Typecheck with `npx tsc --noEmit` (from frontend/).
 - The backend needs the configured `EQL_GAME_DIR` (see `.env.example`);
   without a log file it runs in a degraded no-data mode.
 
@@ -38,6 +45,8 @@ backend/
 ├── session_state.py     # tracker snapshot/restore — sessions survive restarts
 ├── wiki_http.py         # no-Node wiki fallback (MediaWiki api.php -> text)
 ├── mcp_client.py        # stdio client for the EQL MCP server (+ HTTP fallbacks)
+├── builds_data.py       # direct reader of the eqlbuilds snapshot (levels, ids)
+├── spellsets.py         # read/WRITE the game's LO*.ini saved spell sets
 ├── game_data.py         # wiki/builds grounding, verification helpers, ZEM table
 ├── spellbook.py         # /outputfile export parsing (spellbook/inventory/...)
 ├── state_tracker.py     # CharacterTracker — session state, DPS, ledger, encounters
@@ -69,7 +78,23 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
   `/loc`, AA list bursts, pet ownership ("My leader is X").
 - Other players' hits parse as `other_out` but are never broadcast — they
   only feed per-encounter group DPS. Own pets fold into the player
-  ("Pet: <source>" rows); others' pets fold into their owner's ally row.
+  ("Pet: <source>" rows, incl. pet DoTs via the "by <caster>" form);
+  others' pets fold into their owner's ally row. Pets need a "/pet leader"
+  mapping — casting a pet summon with none raises a Vitals hint.
+- XP attribution is FORWARD-ONLY: EQL prints "You gain experience!"
+  BEFORE its kill line, so XP holds as pending and is claimed by the next
+  kill (own, mapped pet, or ally "has been slain by X") within 3s.
+  Backward attribution mis-credited every tick during chain pulls.
+  Per-mob XP and the XP box reset on level-up.
+- Heals name their healer ("Bosh healed itself for 159 (210) hit points
+  by Spirit Tap") — encounter heal rows key "Spell — Healer". Incoming
+  avoidance parses per defense verb (block/dodge/parry/riposte/miss) into
+  the per-fight defense line. Loot-and-auto-sell lines tag "(sold)".
+- Exaltation procs share the spell-damage line shape; effects granted by
+  owned stones (wiki-mined into tracker.exalt_effects at startup/export
+  refresh/character switch) label ability rows "(exaltation)" — MINUS any
+  effect that is also a scribed spell (a cast and a proc are
+  indistinguishable; mislabeling real casts is the worse error).
 - **Adding an event type**: model in `events.py` → regex + branch in
   `parser.py` → (optional) count in `state_tracker.apply()` → (optional) add
   to `PERSISTED_EVENTS` in main.py → `case` in WarLedger `classify()`.
@@ -103,6 +128,14 @@ throttled `state` pushes. REST highlights (see main.py for all):
 - `GET/POST /api/llm` — runtime model switch; clears both consult caches
 - `GET /api/hunting` — deterministic leveling-zone candidates (Gantt chart)
 - `GET /api/spellbook|aas|exports` · `POST /api/exports/refresh|aas/rescan`
+- `GET /api/spellsets` · `POST /api/spellsets/generate` — read the game's
+  saved spell sets / write the counsel as one (source=loadout|prebuffs,
+  optional names[] from the UI checkboxes; gems auto-stacked DD, DoT, AoE,
+  heals from gem 8, utility, pets; loadout set "companion", buff set
+  "prebuffs"; one-time .companion-backup beside the LO*.ini)
+- `GET /api/update-check` (badge click + 6-hourly poll; API with plain
+  tags-page fallback) · `POST /api/update/run` (spawns the updater in its
+  own console window)
 - `GET /api/map|zones|route|geometry|geometry3d|texture/{short}/{name}`
 - `POST /api/overlay` — toggle (launches or kills; `GET` reports state)
 - `GET/POST /api/ocr/*` — screen-OCR position feed config
@@ -143,9 +176,24 @@ display**; failing entries are dropped and logged, never shown. The gates
 - **Locations are gated against the community Recommended-Levels table**:
   the raw WIKITEXT is parsed (the rendered page collapses empty cells) from
   in-era sections only (Antonica/Odus/Faydwer + Planes of Fear/Hate/Sky —
-  Kunark/Velious never parsed), cities excluded, at most ONE above-band
-  "stretch" pick survives, deterministic backfill if the model under-picks.
-  Same table feeds `GET /api/hunting` and the Leveling-chart Gantt.
+  Kunark/Velious never parsed). The 2026-07 redesign carries per-level
+  QUALITY circles (efficient/ok/poor/special), explicit level ranges, and
+  a zone Type column: candidates rank efficient > ok > stretch, cities
+  exclude themselves by Type (efficient-marked rows exempt — the sheet is
+  mid-edit), bands merge range+marks when they disagree, and the prompt
+  says to strongly prefer EFFICIENT zones. At most ONE stretch pick
+  survives; deterministic backfill if the model under-picks. Same data
+  feeds `GET /api/hunting` and the Leveling-chart Gantt.
+- **Permanent buffs** (self-target + zero durationTicks, minus
+  travel/summon/pet/FD/res SPAs) are listed in the prompt with a
+  never-say-"refresh" instruction — Instrument of Nife-class buffs last
+  until death.
+- Deterministic extras: a vendor "purchase" list (near-level missing
+  spells, buy-ahead marked), nice_to_have backfilled with owned
+  non-superseded alternatives when the LLM lists few, and cached counsel
+  restores after ANY restart via `?cached=1` — marked `stale` when the
+  context moved on instead of being discarded. Consults are button-press
+  ONLY, never automatic.
 - Tiered loadout: must_have / should_have fill the spell slots exactly;
   nice_to_have offers swaps. Spell levels annotated from the spellbook.
 
@@ -172,7 +220,15 @@ whenever the Inventory parse changes.
   Sockets are TYPED — focus/clicky/worn/proc (taxonomy per
   eqlegendstools.com); each stone's type is inferred from its base item's
   Effect line, proc stones fit weapon sockets only, and moves are only
-  recommended between same-type sockets ("unknown" stays honest).
+  recommended between same-type sockets ("unknown" stays honest). Stones
+  keep their base item's CLASS list: trio-unusable stones are tagged bank
+  fodder and any move rec for them is machine-dropped.
+- **Pet loadout**: `pet_slots` (user-set per character, next to AA points/
+  Spell slots) caps a pet_gear list — bags/bank items only, at least one
+  weapon, player keeps stat priority, exaltation hosts excluded. The
+  workflow: unload pet gear to bags -> /outputfile inventory -> check
+  exports -> consult gear. Slot-table rows whose recommendation IS the
+  worn item render dimmed (status, not suggestions).
 
 ## LLM runtime (backend/llm_runtime.py)
 
@@ -232,6 +288,20 @@ model selection itself is runtime-switchable in the UI.
   kills animation, color never carries meaning alone.
 - WS hook auto-reconnects (2.5s); ledger pins to bottom unless the user
   scrolled up; events batch through `page.tsx`.
+- **Layout modes** (all persisted in localStorage): the center
+  Atlas/Advisor panel collapses ("◂ hide") into a combat dashboard —
+  encounter sections reflow into CSS multi-columns across the freed width,
+  the ledger becomes a short strip; the War Ledger collapses in EITHER
+  mode (its freed column goes to the encounter panel, which then also
+  reflows); encounter text scales via A−/A+ (CSS zoom); the whole HUD is
+  viewport-locked >=1200px (panels scroll internally, never the page).
+  The Companion chat tab was removed.
+- The Encounter panel shows per-ability hit counts (×), a defense line,
+  healer-attributed heal rows, and a separate Pet section when a mapped
+  pet contributes. The overlay (backend/overlay.py) is a Details-style
+  meter: ranked class-colored bars to raid size, Damage|DPS modes,
+  this-fight|last-5 segments, named-mutex singleton, self-closes when
+  eqgame.exe exits.
 
 ## Testing
 
@@ -255,16 +325,25 @@ model selection itself is runtime-switchable in the UI.
 - One ACTIVE character at a time (header dropdown switches).
 - OCR position + overlay are Windows-only. Dungeon vector charts mostly
   do not exist (classic behavior) — True-walls / 3D modes cover them.
-- Chat-agent suggestion tools still use placeholder data; the Advisor tab
-  is the fully grounded path.
+- The chat agent (backend/agent/graph.py) still exists server-side but has
+  no tab — the Advisor is the grounded path.
+- The community hunting sheet is mid-edit: Type/range/circle data can
+  disagree (parser merges and tolerates); ZEM multipliers still
+  unpublished.
 
 ## Releasing
 
 Bump `APP_VERSION` in backend/main.py AND frontend/lib/version.ts (same
 string), add a CHANGELOG.md section, commit, then `git tag vX.Y.Z` and push
-with `--tags`. The in-app update check compares the running version against
-the newest GitHub tag, and users update via update_companion.bat (git pull
-+ dependency refresh) — untagged pushes are invisible to the checker.
+with `--tags`. Untagged pushes are invisible to users: the in-app check
+(badge click + 6-hourly poll; API with tags-page fallback for rate-limited
+IPs) compares against the newest tag, and update_companion.py downloads
+THAT TAG's ZIP (git clones pull main instead). The updater preserves
+.env/data/node_modules/.next*, side-files changes to running scripts as
+*.new, uses certifi for TLS (never disables verification), and rebuilds
+the frontend into .next-prod. Install path is git-free: releases-page ZIP
+-> install_companion.bat (offers Python/Node via winget, PATH-refreshes
+in-window, cmd /k so the window never vanishes) — see INSTALL.md.
 
 ## Notes for assistants
 
