@@ -1115,6 +1115,13 @@ async def generate_gear_advice(ctx: dict) -> dict:
             logger.info("Dropped %s rec — %s does not fit that slot",
                         s.get("slot"), rec)
             continue
+        if rec:
+            from backend.game_data import _trio_usable, item_line as _il
+            rline = await _il(rec)
+            if rline and _trio_usable(rline, classes) is False:
+                logger.info("Dropped %s rec — %s not usable by the trio",
+                            s.get("slot"), rec)
+                continue
         if rec and (rec in owned or rec_base in owned_base):
             wset = where_by_base.get(rec_base, set())
             s["where"] = ("bags" if "bags" in wset else
