@@ -124,16 +124,20 @@ def _build_prompt(ctx: dict, wiki: str) -> str:
                      "never spend a combat slot on them): " + ", ".join(perm))
     hunt = ctx.get("_hunting") or []
     if hunt:
+        def fmt(c):
+            q = c.get("quality")
+            tag = {"efficient": "EFFICIENT exp here", "ok": "doable"}.get(q, q)
+            return f"{c['zone']} ({c['band']}, {tag})"
         at_lv = [c for c in hunt if c.get("at_level")]
         stretch = [c for c in hunt if not c.get("at_level")]
-        txt = "; ".join(f"{c['zone']} ({c['band']})" for c in at_lv[:20])
+        txt = "; ".join(fmt(c) for c in at_lv[:20])
         if stretch:
             txt += (" | STRETCH ONLY (content starts above them — pick at most "
                     "one, only if the focus wants a challenge): "
                     + "; ".join(f"{c['zone']} ({c['band']})" for c in stretch[:6]))
-        lines.append("- Hunting grounds with content at their level (community "
-                     "Recommended-Levels table, in-era zones only; band = full "
-                     "level range): " + txt)
+        lines.append("- Hunting grounds (community Recommended-Levels table, "
+                     "in-era zones only; the community rates per-level "
+                     "efficiency — STRONGLY prefer EFFICIENT zones): " + txt)
     book = ctx.get("spellbook")
     if book:
         level = ctx.get("level")

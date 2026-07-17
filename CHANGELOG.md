@@ -4,6 +4,18 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.6.1 — 2026-07-17
+
+- Hunting recommendations follow the community's redesigned
+  Recommended-Levels table: per-level efficiency ratings (efficient /
+  doable / not recommended), explicit level ranges, and zone types.
+  The advisor now strongly prefers zones the community rates EFFICIENT at
+  your level, cities are excluded by their own Type column, and the
+  leveling chart reflects the rated bands (gaps included).
+- Encounter parse labels exaltation proc damage "(exaltation)" — except
+  effects that are also scribed spells, which stay attributed to your
+  casting.
+
 ## v1.6.0 — 2026-07-15
 
 - **Much lighter on your PC**: the interface now runs as a production

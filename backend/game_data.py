@@ -527,57 +527,73 @@ async def build_gear_context(items: list, classes: Optional[list] = None,
 
 # ------------------------------------------------------------------ hunting
 
-# The community "Recommended Levels and ZEM List" table. The rendered page
-# collapses empty table cells, so we parse the RAW WIKITEXT: each row is
-# "| [[Zone]]{{...}} || cell || cell ..." and a non-blank cell under a level
-# column means the zone has content at that level. ZEM values themselves are
-# unpublished ("?") — the level marks are the signal.
+# The community "Recommended Levels and ZEM List" table (raw WIKITEXT — the
+# rendered page collapses empty cells). 2026-07 redesign: each row carries a
+# zone Type (City/Dungeon/Open), an explicit level range, and per-level
+# QUALITY circles: lightblue=efficient exp, gold=doable but inefficient,
+# lightpink=not recommended, orangeRing=special purposes.
 ZEM_RAW_URL = ("https://eqlwiki.com/index.php"
                "?title=Recommended_Levels_and_ZEM_List&action=raw")
 IN_ERA_SECTIONS = {"Antonica", "Odus", "Faydwer", "Planes"}
 IN_ERA_PLANES = {"Plane of Fear", "Plane of Hate", "Plane of Sky"}
-# Marked in the table (city guards give XP) but never hunting recommendations.
-CITY_ZONES = {
-    "North Qeynos", "South Qeynos", "Surefall Glade", "Halas", "Rivervale",
-    "Oggok", "Grobb", "East Freeport", "West Freeport", "North Freeport",
-    "Neriak Foreign Quarter", "Neriak Commons", "Neriak Third Gate",
-    "Erudin", "Erudin Palace", "Paineel", "North Kaladim", "South Kaladim",
-    "Northern Felwithe", "Southern Felwithe", "Ak'Anon",
-}
 
 _RE_ZEM_SECTION = re.compile(r"^=+\s*([^=]+?)\s*=+\s*$")
-_RE_ZEM_ZONE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+_RE_ZEM_ROW = re.compile(r"^\|\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*\|\|(.*)$")
+_RE_ZEM_HEADER_COL = re.compile(r"^!.*?\|\s*(\d+)\s*$")
+_RE_ZEM_RANGE = re.compile(r"(\d+)\s*-\s*(\d+)")
+_TIER = (("lightblue", "efficient"), ("goldcircle", "ok"),
+         ("lightpink", "poor"), ("orangering", "special"))
+
+
+def _cell_tier(cell: str):
+    low = cell.lower()
+    for token, tier in _TIER:
+        if token in low:
+            return tier
+    return None
 
 
 def _parse_zem_wikitext(text: str) -> dict:
     zones: dict = {}
-    section, cols = None, []
+    section = None
+    cols: list = []
     for line in text.splitlines():
         m = _RE_ZEM_SECTION.match(line)
         if m:
             section = m.group(1).strip()
+            cols = []
             continue
-        if line.startswith("! Zone"):
-            cols = [int(t) for t in re.findall(r"\d+", line)]
+        if section not in IN_ERA_SECTIONS:
             continue
-        if section not in IN_ERA_SECTIONS or not line.startswith("| "):
+        hm = _RE_ZEM_HEADER_COL.match(line)
+        if hm:
+            cols.append(int(hm.group(1)))
             continue
-        nm = _RE_ZEM_ZONE.search(line)
-        if not nm or not cols:
+        rm = _RE_ZEM_ROW.match(line)
+        if not rm or not cols:
             continue
-        zone = nm.group(1).strip()
+        zone = rm.group(1).strip()  # link TARGET = our chart/graph key
         if section == "Planes" and zone not in IN_ERA_PLANES:
             continue
-        cells = line.split("||")[1:]
-        marks = [lv for lv, c in zip(cols, cells) if c.strip()]
-        if marks:
-            zones[zone] = marks
+        cells = [c.strip() for c in rm.group(2).split("||")]
+        ztype = cells[0].strip().title() if cells else ""
+        lo = hi = None
+        if len(cells) > 1 and (rng := _RE_ZEM_RANGE.search(cells[1])):
+            lo, hi = int(rng.group(1)), int(rng.group(2))
+        tiers = {}
+        for lvl, cell in zip(cols, cells[2:]):
+            t = _cell_tier(cell)
+            if t:
+                tiers[lvl] = t
+        if lo is None and not tiers:
+            continue  # row not filled in yet
+        zones[zone] = {"type": ztype, "lo": lo, "hi": hi, "tiers": tiers}
     return zones
 
 
 async def zem_zone_levels() -> dict:
-    """In-era zone -> sorted marked level columns (cached 24h; {} offline)."""
-    cached = wiki_page_cache.get("zem_levels_wt")
+    """In-era zone -> {type, lo, hi, tiers} (cached 24h; {} offline)."""
+    cached = wiki_page_cache.get("zem_levels_wt2")
     if cached is not None:
         return cached
     import aiohttp
@@ -591,26 +607,56 @@ async def zem_zone_levels() -> dict:
         return {}
     zones = _parse_zem_wikitext(text)
     if zones:
-        wiki_page_cache.set(zones, WIKI_TTL, "zem_levels_wt")
+        wiki_page_cache.set(zones, WIKI_TTL, "zem_levels_wt2")
     return zones
 
 
+def _zone_band(z: dict) -> tuple:
+    """(lo, hi) merging the explicit range with the marked tiers — the
+    sheet is mid-edit and the two sometimes disagree (Everfrost: range
+    1-12 but efficient circles at 40-45)."""
+    marked = [l for l, t in z["tiers"].items() if t in ("efficient", "ok")]
+    pool = [x for x in (z["lo"], z["hi"], *marked) if x is not None]
+    if not pool:
+        return None, None
+    return min(pool), max(pool)
+
+
 async def hunting_candidates(level: int) -> list:
-    """Non-city, in-era zones with content at the level (marked at the
-    bracketing 5-level columns), best fits first."""
+    """Non-city in-era zones fitting the level. Quality comes from the
+    community circles: efficient > ok; range-only rows count as ok. Cities
+    are excluded by their Type column UNLESS the row carries efficient
+    marks (the sheet is mid-edit and some hunting zones are mistyped)."""
     zones = await zem_zone_levels()
-    base = max(1, 5 * (level // 5))
-    nxt = 5 * (level // 5) + 5
+    col = max(1, 5 * (level // 5))
     out = []
-    for zone, marks in zones.items():
-        if zone in CITY_ZONES:
+    for zone, z in zones.items():
+        tiers = z["tiers"]
+        has_eff = "efficient" in tiers.values()
+        if z["type"] == "City" and not has_eff:
             continue
-        hit = [m for m in marks if m in (base, nxt)]
-        if hit:
-            out.append({"zone": zone, "band": f"{min(marks)}-{max(marks)}",
-                        "marks": hit, "levels": marks,
-                        "at_level": base in hit})
-    out.sort(key=lambda z: (0 if base in z["marks"] else 1,
-                            int(z["band"].split("-")[1])
-                            - int(z["band"].split("-")[0])))
+        lo, hi = _zone_band(z)
+        if lo is None:
+            continue
+        tier_here = tiers.get(col) or tiers.get(col + 5)
+        in_range = lo <= level <= (hi or lo)
+        stretch = level < lo <= level + 5
+        if not (tier_here in ("efficient", "ok") or in_range or stretch):
+            continue
+        quality = (tier_here if tier_here in ("efficient", "ok")
+                   else ("ok" if in_range else "stretch"))
+        marked = sorted(l for l, t in tiers.items() if t in ("efficient", "ok"))
+        out.append({
+            "zone": zone,
+            "band": f"{lo}-{hi or lo}",
+            "at_level": quality != "stretch",
+            "quality": quality,
+            "marks": [m for m in marked if m in (col, col + 5)],
+            "levels": marked or [l for l in range(lo, (hi or lo) + 1)
+                                 if l % 5 == 0 or l == lo],
+        })
+    order = {"efficient": 0, "ok": 1, "stretch": 2}
+    out.sort(key=lambda z: (order[z["quality"]],
+                            abs(((int(z["band"].split("-")[0])
+                                  + int(z["band"].split("-")[1])) // 2) - level)))
     return out
