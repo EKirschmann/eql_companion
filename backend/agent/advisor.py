@@ -617,10 +617,21 @@ async def _builtin_gear(ctx: dict) -> dict:
     }
 
 
-def _gate_aas(items: List[dict], owned: dict) -> List[dict]:
-    """Drop AA recommendations for ranks the character already owns (per
-    the /alternateadv list roster) — "Slay Undead rank 5" is noise when
-    ranks >= 5 are bought."""
+def _aa_max_ranks(classes: List[str]) -> dict:
+    """name(lower) -> maxRank across the trio's AA lists (eqlbuilds)."""
+    from backend import builds_data
+    out: dict = {}
+    for cls in classes or []:
+        for a in builds_data.class_aas(cls) or []:
+            if a.get("name") and a.get("maxRank"):
+                out[a["name"].lower()] = a["maxRank"]
+    return out
+
+
+def _gate_aas(items: List[dict], owned: dict, max_ranks: dict) -> List[dict]:
+    """Drop AA recommendations the character can't act on: a named rank
+    already owned ("Slay Undead rank 5" with 5+ bought) or an unranked
+    AA that is already MAXED (Mnemonic Retention at 6/6)."""
     if not owned:
         return items
     omap = {k.lower(): v for k, v in owned.items()}
@@ -631,8 +642,18 @@ def _gate_aas(items: List[dict], owned: dict) -> List[dict]:
         base = (m.group(1) if m else name).strip().rstrip("(").strip()
         want = int(m.group(2)) if m else None
         o = omap.get(base.lower())
-        if o and want is not None and (o.get("ranks") or 0) >= want:
+        have = (o.get("ranks") or 0) if o else 0
+        cap = max_ranks.get(base.lower())
+        if o and want is not None and have >= want:
             logger.info("Dropped AA rec — rank already owned: %s", name)
+            continue
+        if want is not None and cap and want > cap:
+            logger.info("Dropped AA rec — rank beyond max (%s/%s): %s",
+                        want, cap, name)
+            continue
+        if o and want is None and cap and have >= cap:
+            logger.info("Dropped AA rec — already maxed (%s/%s): %s",
+                        have, cap, name)
             continue
         out.append(it)
     return out
@@ -817,10 +838,10 @@ async def generate_advice(ctx: dict) -> dict:
             "replace": verified,
             "aa_now": _gate_aas(
                 _clean_list(data.get("aa_now"), ("name", "cost", "reason"), cap=6),
-                ctx.get("owned_aas") or {}),
+                ctx.get("owned_aas") or {}, _aa_max_ranks(classes)),
             "aa_save": _gate_aas(
                 _clean_list(data.get("aa_save"), ("name", "cost", "reason"), cap=4),
-                ctx.get("owned_aas") or {}),
+                ctx.get("owned_aas") or {}, _aa_max_ranks(classes)),
             "horizon": _clean_list(data.get("horizon"), ("level", "cls", "name", "reason"), cap=8),
             "locations": _gate_locations(
                 _clean_list(data.get("locations"), ("zone", "why", "notable"),
