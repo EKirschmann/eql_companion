@@ -617,21 +617,45 @@ async def _builtin_gear(ctx: dict) -> dict:
     }
 
 
-def _aa_max_ranks(classes: List[str]) -> dict:
-    """name(lower) -> maxRank across the trio's AA lists (eqlbuilds)."""
+def _aa_meta(classes: List[str]) -> dict:
+    """name(lower) -> {maxRank, ladder} from eqlbuilds. `ladder` is the
+    per-rank magnitude sequence parsed from descriptions like
+    "memorize 1 / 2 / 3 / 4 / 5 / 6 additional spell" — used to recover the
+    OWNED rank (the log shows the current value, never a rank number)."""
     from backend import builds_data
     out: dict = {}
     for cls in classes or []:
         for a in builds_data.class_aas(cls) or []:
-            if a.get("name") and a.get("maxRank"):
-                out[a["name"].lower()] = a["maxRank"]
+            nm = a.get("name")
+            if not nm:
+                continue
+            desc = a.get("description") or ""
+            m = re.search(r"(\d+(?:\s*/\s*\d+){2,})", desc)
+            ladder = ([int(x) for x in re.findall(r"\d+", m.group(1))]
+                      if m else [])
+            out[nm.lower()] = {"max": a.get("maxRank"), "ladder": ladder}
     return out
 
 
-def _gate_aas(items: List[dict], owned: dict, max_ranks: dict) -> List[dict]:
-    """Drop AA recommendations the character can't act on: a named rank
-    already owned ("Slay Undead rank 5" with 5+ bought) or an unranked
-    AA that is already MAXED (Mnemonic Retention at 6/6)."""
+def _owned_rank(desc: str, meta: dict) -> Optional[int]:
+    """Recover the owned rank: the position in the eqlbuilds ladder whose
+    value matches the number in the log's current-rank description."""
+    ladder = (meta or {}).get("ladder") or []
+    if not ladder or not desc:
+        return None
+    # numbers in the log desc that aren't themselves a slash-ladder
+    nums = [int(x) for x in re.findall(r"\d+", re.sub(r"\d+(\s*/\s*\d+)+", "", desc))]
+    for n in nums:
+        if n in ladder:
+            return ladder.index(n) + 1
+    return None
+
+
+def _gate_aas(items: List[dict], owned: dict, meta: dict) -> List[dict]:
+    """Drop AA recs the character can't act on. Owned rank is RECOVERED from
+    the eqlbuilds ladder (the log's rank counter is unreliable — it just
+    counts list-bursts), so maxed AAs (Mnemonic Retention 6/6) and
+    already-owned ranks are dropped, and ranks beyond max are dropped."""
     if not owned:
         return items
     omap = {k.lower(): v for k, v in owned.items()}
@@ -642,19 +666,22 @@ def _gate_aas(items: List[dict], owned: dict, max_ranks: dict) -> List[dict]:
         base = (m.group(1) if m else name).strip().rstrip("(").strip()
         want = int(m.group(2)) if m else None
         o = omap.get(base.lower())
-        have = (o.get("ranks") or 0) if o else 0
-        cap = max_ranks.get(base.lower())
-        if o and want is not None and have >= want:
-            logger.info("Dropped AA rec — rank already owned: %s", name)
-            continue
+        mt = meta.get(base.lower()) or {}
+        cap = mt.get("max")
+        have = _owned_rank((o or {}).get("desc", ""), mt) if o else None
         if want is not None and cap and want > cap:
             logger.info("Dropped AA rec — rank beyond max (%s/%s): %s",
                         want, cap, name)
             continue
-        if o and want is None and cap and have >= cap:
-            logger.info("Dropped AA rec — already maxed (%s/%s): %s",
-                        have, cap, name)
-            continue
+        if o and have is not None:
+            if want is not None and have >= want:
+                logger.info("Dropped AA rec — rank %s already owned: %s",
+                            want, name)
+                continue
+            if want is None and cap and have >= cap:
+                logger.info("Dropped AA rec — already maxed (%s/%s): %s",
+                            have, cap, name)
+                continue
         out.append(it)
     return out
 
@@ -838,10 +865,10 @@ async def generate_advice(ctx: dict) -> dict:
             "replace": verified,
             "aa_now": _gate_aas(
                 _clean_list(data.get("aa_now"), ("name", "cost", "reason"), cap=6),
-                ctx.get("owned_aas") or {}, _aa_max_ranks(classes)),
+                ctx.get("owned_aas") or {}, _aa_meta(classes)),
             "aa_save": _gate_aas(
                 _clean_list(data.get("aa_save"), ("name", "cost", "reason"), cap=4),
-                ctx.get("owned_aas") or {}, _aa_max_ranks(classes)),
+                ctx.get("owned_aas") or {}, _aa_meta(classes)),
             "horizon": _clean_list(data.get("horizon"), ("level", "cls", "name", "reason"), cap=8),
             "locations": _gate_locations(
                 _clean_list(data.get("locations"), ("zone", "why", "notable"),
@@ -968,10 +995,13 @@ def _full_slot_table(slots: List[dict], worn: Optional[dict]) -> List[dict]:
     return out
 
 
-def _gate_exalt_moves(recs: List[dict], unusable: set,
-                      owned_exalts: List[dict]) -> List[dict]:
-    """Drop moves for trio-unusable stones AND moves to the stone's CURRENT
-    host — the inventory export already says where every stone sits."""
+async def _gate_exalt_moves(recs: List[dict], unusable: set,
+                            owned_exalts: List[dict],
+                            classes: List[str]) -> List[dict]:
+    """Drop moves for trio-unusable stones, moves to the stone's CURRENT
+    host (the export already says where each sits), and moves onto a host
+    the TRIO CANNOT EQUIP (a proc stone on a Druid-only staff is useless)."""
+    from backend.game_data import _trio_usable, item_line as _il
     host_of = {}
     for x in owned_exalts or []:
         hb = _item_base(x.get("host") or "").lower()
@@ -983,11 +1013,21 @@ def _gate_exalt_moves(recs: List[dict], unusable: set,
         low = r["name"].lower()
         if low in unusable or f"{low} (exaltation)" in unusable:
             continue
+        target = r.get("move_to")
         cur = host_of.get(low) or host_of.get(f"{low} (exaltation)")
-        if cur and r.get("move_to") and _item_base(r["move_to"]).lower() == cur:
-            logger.info("Dropped exaltation rec — %s is already socketed "
-                        "in %s", r["name"], r["move_to"])
+        if cur and target and _item_base(target).lower() == cur:
+            logger.info("Dropped exaltation rec — %s already socketed in %s",
+                        r["name"], target)
             continue
+        if target:
+            try:
+                tline = await _il(_item_base(target))
+            except Exception:
+                tline = None
+            if tline and _trio_usable(tline, classes) is False:
+                logger.info("Dropped exaltation rec — host %s not equippable "
+                            "by the trio", target)
+                continue
         out.append(r)
     return out
 
@@ -1216,9 +1256,9 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "farm": _clean_list(data.get("farm"),
                                 ("item", "slot", "zone", "source", "why"),
                                 cap=8, require="item"),
-            "exaltations": _gate_exalt_moves(
+            "exaltations": await _gate_exalt_moves(
                 _clean_list(data.get("exaltations"),
                             ("name", "move_to", "why"),
                             cap=8, require="name"),
-                unusable_exalts, exalts),
+                unusable_exalts, exalts, classes),
             "unknown": gear["unknown"][:10]}
