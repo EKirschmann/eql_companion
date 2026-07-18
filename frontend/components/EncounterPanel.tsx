@@ -227,7 +227,8 @@ export const EncounterPanel = memo(function EncounterPanel({
                         <td className="enc-name">
                           <span className="enc-rule" aria-hidden />
                           {a.name}
-                          {(a.level != null || a.classes) && (
+                          {a.is_pet && <span className="enc-tag">pet</span>}
+                          {!a.is_pet && (a.level != null || a.classes) && (
                             <span className="enc-member-meta">
                               {a.level ?? "?"} {a.classes ?? ""}
                             </span>

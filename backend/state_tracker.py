@@ -272,6 +272,11 @@ class CharacterTracker:
                     self._dmg_window.append((e.ts, e.damage))
                     self._encounter_ability(e.ts, f"Pet: {e.source}", "pet",
                                             e.damage, e.target)
+                    # also credit the pet as a distinct group-DPS contributor
+                    enc2 = self.encounter
+                    if enc2 is not None and (e.ts - enc2["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS:
+                        op = enc2.setdefault("own_pet", {})
+                        op[e.attacker] = op.get(e.attacker, 0) + e.damage
                 else:
                     # Group DPS: credit other players/pets only while an
                     # encounter is live AND they hit one of OUR foes. Never
@@ -425,9 +430,19 @@ class CharacterTracker:
                            "dps": round(dmg / duration, 1),
                            "level": who.get("level"),
                            "classes": who.get("classes")})
-        if allies and enc["total_out"] > 0:
-            allies.append({"name": "You", "damage": enc["total_out"],
-                           "dps": round(enc["total_out"] / duration, 1),
+        own_pet = enc.get("own_pet", {})
+        pet_total = sum(own_pet.values())
+        for pname, pdmg in own_pet.items():
+            label = pname if pname.lower() != f"{self.name} pet".lower() else "Pet"
+            allies.append({"name": label, "damage": pdmg,
+                           "dps": round(pdmg / duration, 1),
+                           "level": None, "classes": None, "is_pet": True})
+        # "You" in the group breakdown is player-only (pet shown separately);
+        # session/personal DPS still counts the pet
+        if (allies or own_pet) and enc["total_out"] > 0:
+            you_dmg = max(0, enc["total_out"] - pet_total)
+            allies.append({"name": "You", "damage": you_dmg,
+                           "dps": round(you_dmg / duration, 1),
                            "level": self.level,
                            "classes": _abbrev_classes(self.class_str)})
         allies.sort(key=lambda a: a["damage"], reverse=True)

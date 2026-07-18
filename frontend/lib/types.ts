@@ -63,6 +63,7 @@ export interface EncounterAlly {
   dps: number;
   level: number | null;
   classes: string | null;
+  is_pet?: boolean;
 }
 
 export interface Encounter {
