@@ -301,7 +301,8 @@ async def on_log_event(event: ev.LogEvent, live: bool) -> None:
     if not live:
         return
 
-    if event.type in ("other_out", "aa_list", "aa_meta", "who_other"):
+    if event.type in ("other_out", "aa_list", "aa_meta", "who_other",
+                      "pet_inv_header", "pet_gear"):
         return  # aggregated into tracker state; raw broadcast would flood the WS
 
     if event.type == "cast":
@@ -989,6 +990,7 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     global _gear_cache, _gear_sig
     inv = load_export(tracker.name, tracker.server, "Inventory")
     sig = (tracker.class_str, tracker.level, tracker.race, tracker.pet_slots,
+           tuple(sorted(tracker.pet_inventory.items())),
            inv["updated"] if inv else None)
     sig = _sig_norm(sig)
     if _gear_cache is not None and _gear_sig == sig and not refresh:
@@ -1002,7 +1004,8 @@ async def get_gear(refresh: bool = False, cached: bool = False):
            "worn": (inv or {}).get("worn"),
            "inventory_items": (inv or {}).get("items"),
            "exaltations": (inv or {}).get("exaltations"),
-           "pet_slots": tracker.pet_slots}
+           "pet_slots": tracker.pet_slots,
+           "pet_inventory": dict(tracker.pet_inventory)}
     advice = await generate_gear_advice(ctx)
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()

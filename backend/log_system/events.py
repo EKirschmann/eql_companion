@@ -153,6 +153,18 @@ class OtherDamageOut(LogEvent):
     source: str  # melee verb or spell name
 
 
+class PetInvHeader(LogEvent):
+    """'Your pet has the following items equipped:' — starts a pet-gear burst."""
+    type: str = "pet_inv_header"
+
+
+class PetGearLine(LogEvent):
+    """'Arms: Barbed Armplates +3' inside a /pet inventory check burst."""
+    type: str = "pet_gear"
+    slot: str
+    item: str
+
+
 class OtherHeal(LogEvent):
     """<Healer> healed <target>[ over time] for N [(M)] hit points by <Spell>."""
     type: str = "other_heal"

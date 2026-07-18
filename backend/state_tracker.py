@@ -103,6 +103,9 @@ class CharacterTracker:
         # set when a pet summon is cast but no pet maps to us — the pet's
         # damage lands in the ally rows until /pet leader is typed
         self.pet_hint = False
+        # /pet inventory check output: slot -> item the pet actually wears
+        self.pet_inventory: dict[str, str] = {}
+        self._pet_inv_ts: Optional[datetime] = None
         # session persistence writes only when something changed
         self._dirty = True
         # lowercase effect names granted by owned exaltation stones — damage
@@ -197,6 +200,15 @@ class CharacterTracker:
             self.race = self.race or e.race
         elif isinstance(e, ev.OtherCharInfo):
             self.who_roster[e.name] = {"level": e.level, "classes": e.classes}
+        elif isinstance(e, ev.PetInvHeader):
+            # start of a "/pet inventory check" burst — begin a fresh capture
+            self._pet_inv_ts = e.ts
+            self.pet_inventory = {}
+        elif isinstance(e, ev.PetGearLine):
+            # slot lines only count within ~10s of the header
+            if (self._pet_inv_ts is not None
+                    and (e.ts - self._pet_inv_ts).total_seconds() <= 10):
+                self.pet_inventory[e.slot] = e.item
         elif isinstance(e, ev.PetLeader):
             if e.owner.lower() == (self.name or "").lower():
                 self.pet_hint = False
@@ -356,7 +368,8 @@ class CharacterTracker:
                         stats["loots"].append(e.item)
 
         self._dirty = True
-        if e.type not in ("other_out", "aa_list", "aa_meta", "who_other"):
+        if e.type not in ("other_out", "aa_list", "aa_meta", "who_other",
+                          "pet_inv_header", "pet_gear"):
             # other_out is too spammy; aa listing bursts are metadata
             self.ledger.append({**e.model_dump(mode="json"), "live": live})
 
@@ -613,6 +626,7 @@ class CharacterTracker:
             "aa_available": self.aa_available,
             "spell_slots": self.spell_slots,
             "pet_slots": self.pet_slots,
+            "pet_inventory": dict(self.pet_inventory),
             "loadout_hint": self.loadout_hint,
             "owned_aas": {
                 "distinct": len(self.owned_aas),

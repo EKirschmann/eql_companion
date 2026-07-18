@@ -156,6 +156,7 @@ export interface ZoneGeometry3D {
 
 export interface Snapshot {
   pet_slots?: number | null;
+  pet_inventory?: Record<string, string>;
   name: string;
   server: string;
   level: number | null;

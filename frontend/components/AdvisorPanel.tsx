@@ -765,11 +765,28 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </ul>
                 </>
               )}
+              {snap?.pet_inventory && Object.keys(snap.pet_inventory).length > 0 && (
+                <>
+                  <div className="adv-sub" style={{ marginTop: 10 }}>
+                    Pet currently equipped (from /pet inventory check)
+                  </div>
+                  <table className="adv-table">
+                    <tbody>
+                      {Object.entries(snap.pet_inventory).map(([slot, item]) => (
+                        <tr key={slot}>
+                          <td className="adv-cls">{slot}</td>
+                          <td>{item}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
               {gear && (gear.pet_gear?.length ?? 0) > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Pet loadout ({snap?.pet_slots ?? "?"} slots) — hand these to the pet;
-                    lost if it dies or is re-summoned
+                    Suggested pet swaps — hand these to the pet; lost if it
+                    dies or is re-summoned
                   </div>
                   <ul className="adv-list">
                     {gear.pet_gear!.map((p) => (

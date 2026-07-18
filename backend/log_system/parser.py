@@ -33,6 +33,11 @@ RE_CAST = re.compile(r"^You begin casting (.+?)\.")
 RE_INTERRUPT = re.compile(r"^Your spell is interrupted\.")
 RE_FIZZLE = re.compile(r"^Your spell fizzles!")
 RE_KILL = re.compile(r"^You have slain (.+?)!")
+RE_PET_INV_HEADER = re.compile(r"^Your pet has the following items equipped:")
+# pet equip slots (fixed set — avoids matching stray "Word: value" lines)
+_PET_SLOTS = ("Charm|Ear|Head|Face|Neck|Shoulders|Arms|Back|Wrist|Range|Hands|"
+              "Primary|Secondary|Fingers|Chest|Legs|Feet|Waist|Ammo")
+RE_PET_GEAR = re.compile(rf"^({_PET_SLOTS}): (.+)$")
 RE_MY_DEATH = re.compile(r"^You have been slain by (.+?)!")
 RE_OTHER_DEATH = re.compile(r"^(.+?) has been slain by (.+?)!")
 RE_EXP = re.compile(r"^You gain (party )?experience!*(?:\s*\((\d+(?:\.\d+)?)%\))?")
@@ -160,6 +165,10 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
     if RE_FIZZLE.match(msg):
         return ev.CastFizzle(**base)
 
+    if RE_PET_INV_HEADER.match(msg):
+        return ev.PetInvHeader(**base)
+    if pg := RE_PET_GEAR.match(msg):
+        return ev.PetGearLine(slot=pg.group(1), item=pg.group(2).strip(), **base)
     if k := RE_KILL.match(msg):
         return ev.Kill(target=k.group(1), **base)
     if d := RE_MY_DEATH.match(msg):
