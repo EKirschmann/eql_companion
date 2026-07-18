@@ -21,6 +21,11 @@ _cache: dict = {"file": None, "mtime": None, "data": None, "index": None}
 
 
 def _snapshot_file() -> Optional[Path]:
+    # bundled copy first (self-contained exe / no MCP clone needed)
+    here = Path(__file__).resolve().parent.parent
+    local = here / "data" / "eqlbuilds" / "classes.json"
+    if local.exists():
+        return local
     if not settings.mcp_server_dir:
         return None
     for sub in ("dist", "src"):

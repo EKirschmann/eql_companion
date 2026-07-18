@@ -1,8 +1,19 @@
+// Same-origin by default (the packaged exe serves UI + API from one
+// FastAPI process). Dev falls back to :8000; override via NEXT_PUBLIC_*.
+const _envApi = process.env.NEXT_PUBLIC_API_URL;
+const _sameOrigin =
+  typeof window !== "undefined" ? window.location.origin : "http://localhost:8000";
+
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  _envApi ?? (typeof window !== "undefined" && window.location.port !== "3000"
+    ? "" // served by the same server -> relative URLs
+    : "http://localhost:8000");
 
 export const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
+  process.env.NEXT_PUBLIC_WS_URL ??
+  (typeof window !== "undefined" && window.location.port !== "3000"
+    ? _sameOrigin.replace(/^http/, "ws") + "/ws"
+    : "ws://localhost:8000/ws");
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`);

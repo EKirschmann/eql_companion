@@ -1,0 +1,15 @@
+# Deterministic, no-OCR, no-LLM build — the lean set for a single executable.
+# Everything runs: HUD, War Ledger, encounters, Atlas (charts/true-walls/3D),
+# spellbook/inventory/AA parsing, the DETERMINISTIC advisor & gear, spell-set
+# writing, update checks. Position comes from /loc lines (no screen OCR).
+# Omitted vs requirements.txt: rapidocr/onnxruntime/mss/numpy/PIL (OCR),
+# langchain*/langgraph/anthropic (LLM), mcp (unused — wiki uses plain HTTP).
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+sqlalchemy>=2.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+psutil>=5.9
+certifi>=2024.0

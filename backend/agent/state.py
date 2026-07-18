@@ -1,5 +1,10 @@
 from typing import Annotated, TypedDict, List, Optional, Any
-from langgraph.graph.message import add_messages
+
+try:
+    from langgraph.graph.message import add_messages
+except ImportError:  # deterministic/lite build ships no langgraph
+    def add_messages(left, right):  # simple concat reducer stand-in
+        return (left or []) + (right or [])
 
 class SuggestionItem(TypedDict, total=False):
     """A single suggestion item."""

@@ -25,3 +25,7 @@ desktop.ini
 
 # Claude Code local settings
 .claude/
+/build/
+/dist/
+*.spec
+data/eqlbuilds/

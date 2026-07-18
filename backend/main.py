@@ -517,6 +517,17 @@ GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
 
+# Single-process mode: if the frontend has been static-exported (the exe /
+# same-origin build), serve it from this same server. Mounted AFTER all
+# /api and /ws routes are registered (done at import end).
+def _mount_static_ui() -> None:
+    from fastapi.staticfiles import StaticFiles
+    ui = Path(__file__).resolve().parent.parent / "frontend" / "out"
+    if ui.is_dir():
+        app.mount("/", StaticFiles(directory=str(ui), html=True), name="ui")
+        logger.info("Serving static UI from %s", ui)
+
+
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(
     CORSMiddleware,
@@ -1264,3 +1275,5 @@ async def websocket_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
     except Exception:
         ws_manager.disconnect(ws)
+
+_mount_static_ui()

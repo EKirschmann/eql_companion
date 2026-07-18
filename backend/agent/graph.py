@@ -10,8 +10,13 @@ Model swapping: `_build_llm()` is the single seam — see CLAUDE.md.
 """
 import logging
 
-from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.graph import END, StateGraph
+try:
+    from langchain_core.messages import BaseMessage, HumanMessage
+except ImportError:  # deterministic/lite build ships no langchain
+    class HumanMessage:
+        def __init__(self, content=""):
+            self.content = content
+    BaseMessage = HumanMessage
 
 from backend.agent.state import AgentState
 from backend.agent.tools import (
@@ -120,6 +125,7 @@ async def respond(state: AgentState) -> dict:
 
 
 def build_agent_graph():
+    from langgraph.graph import END, StateGraph  # optional (chat agent)
     graph = StateGraph(AgentState)
     graph.add_node("gather", gather)
     graph.add_node("respond", respond)

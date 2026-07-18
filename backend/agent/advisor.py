@@ -23,7 +23,13 @@ import re
 from datetime import datetime
 from typing import Any, List, Optional
 
-from langchain_core.messages import HumanMessage
+try:
+    from langchain_core.messages import HumanMessage
+except ImportError:  # deterministic/lite build ships no langchain
+    class HumanMessage:  # minimal stand-in; only the LLM path ever uses it
+        def __init__(self, content=""):
+            self.content = content
+
 
 from backend.llm_runtime import active as llm_active, get_llm
 from backend.config import settings
