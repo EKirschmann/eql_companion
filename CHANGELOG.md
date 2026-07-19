@@ -4,6 +4,22 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.7.0 — 2026-07-19
+
+- Fixed the launcher serving a stale (older-version) interface in
+  production mode: start_companion.bat now rebuilds the UI automatically
+  whenever the source changed since the last build.
+- Pet tracking: reads /pet inventory check to know the pet's real loadout;
+  a mapped pet shows as its own "(pet)" row in group DPS with its abilities
+  tracked; gear consult fills the pet's empty slots and respects the slot
+  count you set; an emptied pet is recognized and cleared.
+- Exaltations: "can socket into" now uses the real class/slot rules
+  (eqlwiki) — proc stones need a shared class with the target weapon, etc.
+- AA counsel drops already-owned/maxed ranks (rank recovered from data
+  since the log omits it); gear recs are slot- and class-checked.
+- Groundwork for a dependency-free single executable (deterministic, no-OCR
+  build; single-process serving).
+
 ## v1.6.1 — 2026-07-17
 
 - Hunting recommendations follow the community's redesigned
