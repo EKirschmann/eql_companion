@@ -576,6 +576,10 @@ async def patch_character(patch: CharacterPatch, db: Session = Depends(get_db)):
     if patch.class_str is not None:  # manual trio edit resolves the mismatch hint
         tracker.unknown_casts.clear()
         tracker.loadout_hint = None
+    if patch.pet_slots is not None:
+        # setting a slot count means a (re)configured pet — drop any stale
+        # equipped list; /pet inventory check repopulates it
+        tracker.pet_inventory = {}
     db.commit()
     await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
     return tracker.snapshot()

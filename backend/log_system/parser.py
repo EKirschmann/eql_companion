@@ -33,7 +33,9 @@ RE_CAST = re.compile(r"^You begin casting (.+?)\.")
 RE_INTERRUPT = re.compile(r"^Your spell is interrupted\.")
 RE_FIZZLE = re.compile(r"^Your spell fizzles!")
 RE_KILL = re.compile(r"^You have slain (.+?)!")
-RE_PET_INV_HEADER = re.compile(r"^Your pet has the following items equipped:")
+RE_PET_INV_HEADER = re.compile(
+    r"^Your pet (?:has the following items equipped:|does not have any "
+    r"items equipped)")
 # pet equip slots (fixed set — avoids matching stray "Word: value" lines)
 _PET_SLOTS = ("Charm|Ear|Head|Face|Neck|Shoulders|Arms|Back|Wrist|Range|Hands|"
               "Primary|Secondary|Fingers|Chest|Legs|Feet|Waist|Ammo")

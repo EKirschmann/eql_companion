@@ -1166,26 +1166,32 @@ async def generate_gear_advice(ctx: dict) -> dict:
         + "; ".join(f"{k}: {v}" for k, v in sorted((ctx.get('worn') or {}).items())),
     ]
     pet_inv = ctx.get("pet_inventory") or {}
-    # real slot count comes from /pet inventory check when present, else the
-    # user-set number
-    pet_slots = len(pet_inv) or (ctx.get("pet_slots") or 0)
+    # the user-set slot count is authoritative; fall back to what the last
+    # /pet inventory check showed
+    pet_slots = (ctx.get("pet_slots") or 0) or len(pet_inv)
     if pet_slots > 0:
-        cur = ("The pet CURRENTLY has equipped (from /pet inventory check): "
-               + "; ".join(f"{s}: {i}" for s, i in sorted(pet_inv.items()))
-               + ". Only suggest a swap when a bags/bank item is CLEARLY "
-               "better than what already sits in that slot; leave good "
-               "current gear alone. " if pet_inv else
-               f"The pet has ~{pet_slots} equipment slots. ")
+        if pet_inv:
+            cur = ("The pet CURRENTLY has equipped (from /pet inventory "
+                   "check): "
+                   + "; ".join(f"{s}: {i}" for s, i in sorted(pet_inv.items()))
+                   + f". It has {pet_slots} slots total. FILL every empty "
+                   "slot with the best owned item, and for a filled slot "
+                   "suggest a swap only when a bags/bank item is CLEARLY "
+                   "better. ")
+        else:
+            cur = (f"The pet has {pet_slots} equipment slots and is CURRENTLY "
+                   "EMPTY — outfit it: at least one weapon, then the best "
+                   "remaining armor, up to the slot count. ")
         pet_block = (
             "PET LOADOUT: " + cur +
             "Pets equip items HANDED to them — weapons boost their damage "
             "(procs work), armor their AC — and handed items are DESTROYED "
-            "when the pet dies or is re-summoned. Draw upgrades from bags/"
-            "bank ONLY (never the player's worn gear, never exaltation "
-            "hosts). In 'pet_gear' list ONLY the slots worth changing, each "
-            "with the item and a one-line why. THE PLAYER ALWAYS HAS STAT "
-            "PRIORITY: never assign the pet an item that would beat "
-            "something the player wears in a comparable slot.")
+            "when the pet dies or is re-summoned. Draw from bags/bank ONLY "
+            "(never the player's worn gear, never exaltation hosts). Put "
+            "each pick in 'pet_gear' with the item, slot, and a one-line "
+            "why. THE PLAYER ALWAYS HAS STAT PRIORITY: never assign the pet "
+            "an item that would beat something the player wears in a "
+            "comparable slot.")
     else:
         pet_block = ("PET LOADOUT: none — pet_gear must be []. (The player "
                      "sets their pet's slot count in the Advisor tab, or the "
