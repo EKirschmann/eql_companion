@@ -96,7 +96,10 @@ class MCPClient:
                     return None
                 result = resp.get("result", {})
                 if result.get("isError"):
-                    logger.warning("MCP tool %s returned isError", name)
+                    # expected for pages that don't exist (odd item/exaltation
+                    # names) — wiki_page() falls back to plain HTTP, so this is
+                    # benign; debug-level to keep startup logs clean
+                    logger.debug("MCP tool %s returned isError (falling back)", name)
                     return None
                 return result.get("structuredContent") or result
             except Exception as e:
