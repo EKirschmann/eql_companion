@@ -1167,10 +1167,13 @@ async def generate_gear_advice(ctx: dict) -> dict:
     ]
     pet_inv = ctx.get("pet_inventory") or {}
     pet_slots = (ctx.get("pet_slots") or 0) or len(pet_inv)
-    # pet's equip class(es): user-set (e.g. an Earth pet is WAR/RNG), default
-    # Warrior — the base class every pet shares
-    pet_class_str = (ctx.get("pet_classes") or "Warrior").strip()
-    pet_classes = [c.strip() for c in re.split(r"[/,]", pet_class_str) if c.strip()]
+    # every pet is base Warrior; the user sets only the SECONDARY (an Earth
+    # pet is WAR/RNG, a Water pet WAR/ROG). Effective classes = WAR + 2nd.
+    pet_2nd = (ctx.get("pet_classes") or "").strip()
+    pet_classes = ["Warrior"] + [
+        c.strip() for c in re.split(r"[/,]", pet_2nd)
+        if c.strip() and c.strip().lower() not in ("warrior", "war")]
+    pet_class_str = "/".join(pet_classes)
     if pet_slots > 0:
         # deterministic pool: owned bags/bank gear the PET's class can equip
         # (not the player's), with stats, not the player's worn gear, not

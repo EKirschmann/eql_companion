@@ -691,11 +691,11 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                       onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
                     />
                   </label>
-                  <label>
-                    pet class
+                  <label title="Every pet is base Warrior — set only its SECOND class (Water pet = Rogue, Earth pet = Ranger). Gear the pet can wear is Warrior OR this.">
+                    pet 2nd class
                     <input
                       type="text"
-                      placeholder="Warrior"
+                      placeholder="e.g. Rogue"
                       value={petClassDraft}
                       onChange={(e) => setPetClassDraft(e.target.value)}
                       onBlur={() => patch({ pet_classes: petClassDraft.trim() || null })}
@@ -826,7 +826,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                 return (
                   <>
                     <div className="adv-sub" style={{ marginTop: 10 }}>
-                      Pet gear ({snap?.pet_classes || "Warrior"}) — from /pet
+                      Pet gear (Warrior{snap?.pet_classes ? `/${snap.pet_classes}` : ""}) — from /pet
                       inventory check; suggested items persist through death &amp;
                       re-summon
                     </div>
