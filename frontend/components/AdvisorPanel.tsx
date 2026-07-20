@@ -795,13 +795,16 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                 const petInv = snap?.pet_inventory ?? {};
                 const petGear = gear?.pet_gear ?? [];
                 if (!Object.keys(petInv).length && !petGear.length) return null;
+                // the pet's slots are ONLY what /pet inventory check shows —
+                // never invent slots the pet doesn't have
+                const petSlotKeys = Object.keys(petInv);
+                const petSlotSet = new Set(petSlotKeys.map((s) => s.toLowerCase()));
                 const bySlot: Record<string, { item: string; why: string; where?: string }> = {};
-                const noSlot: typeof petGear = [];
                 petGear.forEach((p) => {
-                  if (p.slot && !bySlot[p.slot]) bySlot[p.slot] = p;
-                  else if (!p.slot) noSlot.push(p);
+                  if (p.slot && petSlotSet.has(p.slot.toLowerCase()) && !bySlot[p.slot])
+                    bySlot[p.slot] = p;
                 });
-                const slots = Array.from(new Set([...Object.keys(petInv), ...Object.keys(bySlot)]));
+                const slots = petSlotKeys;
                 type Row = { slot: string; now: string | null; use: string | null; why: string; changed: boolean };
                 const rows: Row[] = slots.map((slot) => {
                   const now = petInv[slot] ?? null;
@@ -818,15 +821,6 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                     changed: !!sug,
                   };
                 });
-                noSlot.forEach((p) =>
-                  rows.push({
-                    slot: "—",
-                    now: null,
-                    use: p.item,
-                    why: `${p.why}${p.where ? ` (${p.where})` : ""}`,
-                    changed: true,
-                  }),
-                );
                 return (
                   <>
                     <div className="adv-sub" style={{ marginTop: 10 }}>

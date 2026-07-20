@@ -1196,24 +1196,31 @@ async def generate_gear_advice(ctx: dict) -> dict:
                 continue  # only real gear (armor/weapons)
             pool.append(nm)
         pool_txt = "; ".join(sorted(set(pool))[:40]) or "none"
+        pet_slot_names = sorted(pet_inv.keys())
+        slot_rule = (
+            "The pet has EXACTLY these slots and NO OTHERS: "
+            + ", ".join(pet_slot_names)
+            + ". Suggest upgrades ONLY for these slots — never invent "
+            "Shoulders/Feet/Back or any slot not in that list. "
+            if pet_slot_names else
+            f"The pet holds up to {pet_slots} items total. ")
         cur = ("The pet CURRENTLY has: "
                + ("; ".join(f"{s}: {i}" for s, i in sorted(pet_inv.items()))
                   if pet_inv else "nothing")
-               + f". Slots: {pet_slots}. ")
+               + ". ")
         pet_block = (
             f"PET LOADOUT — the pet's equip class is {pet_class_str} (NOT "
-            "the player's classes). Pet slots are FLEXIBLE (treat them like "
-            "generic slots — rank items by usefulness, don't force a rigid "
-            "slot-for-slot match): a weapon boosts pet damage (best "
-            "damage/delay, procs work), armor pieces add AC. " + cur +
-            "OWNED items the PET CAN EQUIP (bags/bank, already class-checked "
-            "for you): " + pool_txt + ". From THIS LIST ONLY, pick up to "
-            f"{pet_slots} that improve the pet over what it now has — one "
-            "weapon plus the best armor — each in 'pet_gear' as item + why. "
-            "Pet gear PERSISTS through death and re-summon (it stays in the "
-            "pet's inventory), so it's a lasting investment. THE PLAYER "
-            "KEEPS STAT PRIORITY: never hand the pet something better than "
-            "the player's own worn gear in that slot.")
+            "the player's classes). " + slot_rule + cur +
+            "Maximize the pet's combat stats: ensure ONE weapon (best "
+            "damage/delay, procs help), and fill the rest with the highest "
+            "AC / attack / haste items. OWNED items the PET CAN EQUIP "
+            "(bags/bank, already class-checked): " + pool_txt +
+            ". From THIS LIST ONLY, pick items that beat what the pet now "
+            f"has, at most {pet_slots} total, each in 'pet_gear' as "
+            "{item, slot, why} — the slot MUST be one the pet already has. "
+            "Pet gear PERSISTS through death/re-summon. THE PLAYER KEEPS "
+            "STAT PRIORITY: never hand the pet something better than the "
+            "player's own worn gear.")
     else:
         pet_block = ("PET LOADOUT: none — pet_gear must be []. (The player "
                      "sets their pet's slot count + class in the Advisor "
@@ -1338,6 +1345,11 @@ async def generate_gear_advice(ctx: dict) -> dict:
             usable = None
         if usable is False:
             logger.info("Dropped pet-gear rec — pet class can't use: %s", ph["item"])
+            continue
+        pet_slot_set = {s.lower() for s in (ctx.get("pet_inventory") or {})}
+        if pet_slot_set and str(ph.get("slot") or "").lower() not in pet_slot_set:
+            logger.info("Dropped pet-gear rec — slot not on this pet: %s (%s)",
+                        ph["item"], ph.get("slot"))
             continue
         ph["where"] = where
         pet_gear.append(ph)
