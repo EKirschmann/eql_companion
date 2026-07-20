@@ -801,8 +801,8 @@ export const AdvisorPanel = memo(function AdvisorPanel({
               {gear && (gear.pet_gear?.length ?? 0) > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Suggested pet swaps — hand these to the pet; lost if it
-                    dies or is re-summoned
+                    Suggested pet gear — hand these to the pet; it persists
+                    through death and re-summon
                   </div>
                   <ul className="adv-list">
                     {gear.pet_gear!.map((p) => (

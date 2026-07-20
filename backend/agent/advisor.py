@@ -1207,7 +1207,8 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "for you): " + pool_txt + ". From THIS LIST ONLY, pick up to "
             f"{pet_slots} that improve the pet over what it now has — one "
             "weapon plus the best armor — each in 'pet_gear' as item + why. "
-            "Items are DESTROYED when the pet dies/re-summons. THE PLAYER "
+            "Pet gear PERSISTS through death and re-summon (it stays in the "
+            "pet's inventory), so it's a lasting investment. THE PLAYER "
             "KEEPS STAT PRIORITY: never hand the pet something better than "
             "the player's own worn gear in that slot.")
     else:
