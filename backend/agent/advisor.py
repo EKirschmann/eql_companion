@@ -1181,11 +1181,15 @@ async def generate_gear_advice(ctx: dict) -> dict:
     for c in pet_base + player_classes:
         if c not in pet_classes:
             pet_classes.append(c)
-    # pet window slots: 4 base + 3 per pet-capable class in the combo
-    PET_CAPABLE = {"Magician", "Necromancer", "Beastlord", "Enchanter",
+    # pet window: 4 base slots + a per-class modifier for each relevant
+    # class in the combo. Only classes that SUMMON a pet grant one.
+    PET_SLOT_MOD = {"Beastlord": 3, "Magician": 3, "Necromancer": 2,
+                    "Enchanter": 1, "Druid": 1, "Shaman": 1}
+    PET_SUMMONS = {"Magician", "Necromancer", "Beastlord", "Enchanter",
                    "Shadow Knight"}
-    n_pet_classes = sum(1 for c in player_classes if c in PET_CAPABLE)
-    auto_slots = (4 + 3 * n_pet_classes) if n_pet_classes else 0
+    has_pet = any(c in PET_SUMMONS for c in player_classes)
+    auto_slots = (4 + sum(PET_SLOT_MOD.get(c, 0) for c in player_classes)
+                  ) if has_pet else 0
     pet_slots = (ctx.get("pet_slots") or 0) or auto_slots or len(pet_inv)
     if pet_slots > 0:
         # deterministic pool: owned bags/bank gear the PET's class can equip
@@ -1207,6 +1211,8 @@ async def generate_gear_advice(ctx: dict) -> dict:
                 continue
             if not re.search(r"AC: *[0-9]|DMG: *[0-9]|Skill:", line):
                 continue  # only real gear (armor/weapons)
+            if re.search(r"No Drop|NO DROP|NODROP", line):
+                continue  # pets accept Attunable items only, not No-Drop
             pool.append(nm)
         pool_txt = "; ".join(sorted(set(pool))[:40]) or "none"
         cur = ("The pet CURRENTLY holds: "
@@ -1220,11 +1226,17 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "named slots (no Head/Arms/Chest structure): do NOT organize by "
             "slot. " + cur +
             "Recommend the BEST loadout of up to "
-            f"{pet_slots} items total: ALWAYS include a strong WEAPON — at "
-            "high level a good weapon's damage/delay beats the pet's default "
-            "attack, and procs fire — then the highest-stat items (AC, "
-            "attack, HP, haste). OWNED items the PET CAN EQUIP (bags/bank, "
-            "already class-checked): " + pool_txt +
+            f"{pet_slots} items total, following the pet auto-equip rules: "
+            "(1) up to TWO weapons — pick the best damage/delay ratios; at "
+            "high level a real weapon beats the pet's default attack, and "
+            "PROCCING weapons (lifetap/damage) are top DPS picks; (2) a "
+            "HASTE belt (haste stacks with spell haste — a top pick); (3) "
+            "armor prioritizing AC over HP, plus cleave/ferocity/attack "
+            "gear; the two 'any' slots can hold a shield (big AC), rings, "
+            "earrings, or a cloak. Do NOT recommend two items of the same "
+            "category (duplicates don't stack), and note total gear stats "
+            "cap at 510. OWNED items the PET CAN EQUIP (bags/bank, already "
+            "class-checked): " + pool_txt +
             ". From THIS LIST ONLY, list in 'pet_gear' each recommended item "
             "as {item, why} (no slot needed), best first, at most "
             f"{pet_slots} items. Pet gear PERSISTS through death/re-summon. "

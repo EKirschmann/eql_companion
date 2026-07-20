@@ -691,7 +691,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                       onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
                     />
                   </label>
-                  <label title="Every pet is base Warrior — set only its SECOND class (Water pet = Rogue, Earth pet = Ranger). Gear the pet can wear is Warrior OR this.">
+                  <label title="Every pet is base Warrior — set only its SECOND class by pet type: Mage Earth=Ranger, Water=Rogue, Fire=Wizard; Enchanter=Paladin; Beastlord=Berserker; Necro/SK Undead=Shadow Knight. The pet can also wear your character classes' gear.">
                     pet 2nd class
                     <select
                       value={petClassDraft}
