@@ -1166,14 +1166,27 @@ async def generate_gear_advice(ctx: dict) -> dict:
         + "; ".join(f"{k}: {v}" for k, v in sorted((ctx.get('worn') or {}).items())),
     ]
     pet_inv = ctx.get("pet_inventory") or {}
-    pet_slots = (ctx.get("pet_slots") or 0) or len(pet_inv)
-    # every pet is base Warrior; the user sets only the SECONDARY (an Earth
-    # pet is WAR/RNG, a Water pet WAR/ROG). Effective classes = WAR + 2nd.
+    player_classes = [c.strip() for c in (ctx.get("class_str") or "").split("/")
+                      if c.strip()]
+    # every pet is base Warrior + a secondary by pet type (Water = ROG, Fire
+    # = WIZ, Beastlord = BER). The user sets only that secondary.
     pet_2nd = (ctx.get("pet_classes") or "").strip()
-    pet_classes = ["Warrior"] + [
+    pet_base = ["Warrior"] + [
         c.strip() for c in re.split(r"[/,]", pet_2nd)
         if c.strip() and c.strip().lower() not in ("warrior", "war")]
-    pet_class_str = "/".join(pet_classes)
+    pet_class_str = "/".join(pet_base)
+    # a pet equips gear usable by its TWO base classes PLUS the player's
+    # trio — up to five classes' worth of items
+    pet_classes = []
+    for c in pet_base + player_classes:
+        if c not in pet_classes:
+            pet_classes.append(c)
+    # pet window slots: 4 base + 3 per pet-capable class in the combo
+    PET_CAPABLE = {"Magician", "Necromancer", "Beastlord", "Enchanter",
+                   "Shadow Knight"}
+    n_pet_classes = sum(1 for c in player_classes if c in PET_CAPABLE)
+    auto_slots = (4 + 3 * n_pet_classes) if n_pet_classes else 0
+    pet_slots = (ctx.get("pet_slots") or 0) or auto_slots or len(pet_inv)
     if pet_slots > 0:
         # deterministic pool: owned bags/bank gear the PET's class can equip
         # (not the player's), with stats, not the player's worn gear, not
@@ -1200,16 +1213,18 @@ async def generate_gear_advice(ctx: dict) -> dict:
                + (", ".join(sorted(pet_inv.values())) if pet_inv else "nothing")
                + ". ")
         pet_block = (
-            f"PET LOADOUT — the pet's equip class is {pet_class_str} (NOT the "
-            f"player's classes). The pet has {pet_slots} GENERIC slots — it "
-            "is just a bag of up to that many items, with NO named "
-            "slots (no Head/Arms/Chest structure): do NOT organize by slot. "
-            + cur +
+            f"PET LOADOUT — the pet's base classes are {pet_class_str}, and "
+            "it can ALSO wear the player's classes' gear (up to five classes "
+            "total; already filtered for you). The pet has "
+            f"{pet_slots} GENERIC slots — a bag of up to that many items, NO "
+            "named slots (no Head/Arms/Chest structure): do NOT organize by "
+            "slot. " + cur +
             "Recommend the BEST loadout of up to "
-            f"{pet_slots} items total: ensure ONE weapon (best damage/delay, "
-            "procs help), and the rest the highest-stat items for a melee "
-            "pet (AC, attack, HP, haste). OWNED items the PET CAN EQUIP "
-            "(bags/bank, already class-checked): " + pool_txt +
+            f"{pet_slots} items total: ALWAYS include a strong WEAPON — at "
+            "high level a good weapon's damage/delay beats the pet's default "
+            "attack, and procs fire — then the highest-stat items (AC, "
+            "attack, HP, haste). OWNED items the PET CAN EQUIP (bags/bank, "
+            "already class-checked): " + pool_txt +
             ". From THIS LIST ONLY, list in 'pet_gear' each recommended item "
             "as {item, why} (no slot needed), best first, at most "
             f"{pet_slots} items. Pet gear PERSISTS through death/re-summon. "

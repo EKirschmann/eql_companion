@@ -679,12 +679,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
               <h3 className="adv-gear-head">
                 <span>Equipment</span>
                 <span className="adv-pet-inline" title="Pet equipment slot count and equip class — used only by the gear consult">
-                  <label>
+                  <label title="Auto-computed from your pet classes (4 base + 3 per pet-capable class in your combo). Type a number here only to override.">
                     pet slots
                     <input
                       type="number"
                       min={0}
-                      placeholder="0"
+                      placeholder="auto"
                       value={petSlotsDraft}
                       onChange={(e) => setPetSlotsDraft(e.target.value)}
                       onBlur={() => numberPatch(petSlotsDraft, "pet_slots")}
@@ -801,9 +801,9 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                 return (
                   <>
                     <div className="adv-sub" style={{ marginTop: 10 }}>
-                      Pet gear (Warrior{snap?.pet_classes ? `/${snap.pet_classes}` : ""})
-                      — up to {snap?.pet_slots ?? held.length} items; persists through
-                      death &amp; re-summon
+                      Pet gear (Warrior{snap?.pet_classes ? `/${snap.pet_classes}` : ""} +
+                      your classes) — up to {snap?.pet_slots ?? held.length} items;
+                      persists through death &amp; re-summon
                     </div>
                     {held.length > 0 && (
                       <p className="adv-purchase">
