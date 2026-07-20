@@ -27,7 +27,19 @@ END USERS run production mode (`start_companion.bat` with no args): uvicorn
 WITHOUT --reload + `next start` serving the build from `.next-prod`
 (~350MB lighter, no file watchers). Production builds use a SEPARATE dist
 dir (`NEXT_DIST_DIR=.next-prod`), so a running dev server and a prod build
-can no longer corrupt each other.
+can no longer corrupt each other. The launcher **auto-rebuilds** the prod
+UI when any frontend source is newer than the last build (a stale
+`.next-prod` once served an old version). While iterating, prefer `dev`
+mode — its `--reload` has occasionally wedged in production launches, and
+a lite deterministic mode powers a planned single .exe (see below).
+
+**Single-executable groundwork** (deterministic/no-OCR): all langchain/
+langgraph imports are guarded so the backend BOOTS without them;
+`requirements-lite.txt` is the core-only set; FastAPI serves the static
+`frontend/out` at `/` (same-origin, `api.ts` auto-detects); `next.config`
+`NEXT_EXPORT=1` static-exports; `run_companion.py` runs in-process uvicorn
++ a native WebView2 window; `build_exe.bat` -> PyInstaller onefile. The
+final .exe must be built on Windows (not verifiable in this env).
 
 - `--reload` restarts on .py changes and re-reads `.env`; editing `.env`
   alone does NOT trigger a reload — touch a backend file or restart.
@@ -81,6 +93,13 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
   ("Pet: <source>" rows, incl. pet DoTs via the "by <caster>" form);
   others' pets fold into their owner's ally row. Pets need a "/pet leader"
   mapping — casting a pet summon with none raises a Vitals hint.
+- `/pet inventory check` logs a burst ("Your pet has the following items
+  equipped:" or "does not have any items equipped") + slot lines, parsed
+  into `tracker.pet_inventory`. A MAPPED pet (`/pet leader`) appears as its
+  own "(pet)" row in the group-DPS breakdown ("You" there is player-only
+  so the split never double-counts); its abilities show in the encounter
+  Pet section. Exaltation proc damage is labeled "(exaltation)" unless the
+  effect is also a scribed spell (a cast and a proc are indistinguishable).
 - XP attribution is FORWARD-ONLY: EQL prints "You gain experience!"
   BEFORE its kill line, so XP holds as pending and is claimed by the next
   kill (own, mapped pet, or ally "has been slain by X") within 3s.
@@ -196,6 +215,12 @@ display**; failing entries are dropped and logged, never shown. The gates
   ONLY, never automatic.
 - Tiered loadout: must_have / should_have fill the spell slots exactly;
   nice_to_have offers swaps. Spell levels annotated from the spellbook.
+- **AA counsel is gated**: `/alternateadv list` never prints ranks (it just
+  lists each ability once), so the roster's rank counter is unreliable. The
+  OWNED rank is RECOVERED by matching the log's current-effect number
+  against the eqlbuilds per-rank ladder ("memorize 1/2/3/4/5/6 additional
+  spell" + log "6 additional" => rank 6). Maxed AAs and already-owned/
+  beyond-max ranks are dropped.
 
 **Owned state** comes from `/outputfile` exports parsed in spellbook.py
 (`<Name>_<server>-...-<Kind>.txt` in the game dir): Spellbook, MissingSpells,
@@ -216,19 +241,35 @@ whenever the Inventory parse changes.
 - Gear is usable if ANY ONE of the trio can use it (`[USABLE]` pre-tags;
   wiki Race: lines are stale classic-era data and are stripped).
 - A 2H primary recommendation deterministically drops the secondary rec.
-- Exaltations parse from `<Loc>-SlotN` socket sub-rows with host tracking.
-  Sockets are TYPED — focus/clicky/worn/proc (taxonomy per
-  eqlegendstools.com); each stone's type is inferred from its base item's
-  Effect line, proc stones fit weapon sockets only, and moves are only
-  recommended between same-type sockets ("unknown" stays honest). Stones
-  keep their base item's CLASS list: trio-unusable stones are tagged bank
-  fodder and any move rec for them is machine-dropped.
-- **Pet loadout**: `pet_slots` (user-set per character, next to AA points/
-  Spell slots) caps a pet_gear list — bags/bank items only, at least one
-  weapon, player keeps stat priority, exaltation hosts excluded. The
-  workflow: unload pet gear to bags -> /outputfile inventory -> check
-  exports -> consult gear. Slot-table rows whose recommendation IS the
-  worn item render dimmed (status, not suggestions).
+- Deterministic gates every gear rec must pass: it must be OWNED, fit the
+  item's wiki **Slot** line, be **trio-usable** (the `[USABLE]` tag is
+  advisory — the gate enforces), not a same-item lower/equal rank, and a
+  recommended 2H primary empties the Secondary ROW. Rows whose rec IS the
+  worn item render dimmed (status, not a suggestion).
+- **Exaltations** (informational, NOT prescriptive moves — the real
+  socketing rules per eqlwiki/eqlegendstools are now known): a stone shows
+  its granted effect, ACTIVE vs DORMANT-until-LN (Effect "at Level N" vs
+  the character's level), stat-stone/class-usable status, current host,
+  and **"can socket into"** — the OWNED items it may legally move to.
+  Rule: PROC (Combat) stones need a shared class between SOURCE and TARGET
+  item (weapon->weapon, 2H proc -> Primary only); focus/clicky/worn need
+  shared class + same slot. All from wiki Class/Slot/Skill lines.
+- **Pet loadout** — pets are a BAG of N generic slots, NOT the player's
+  slot layout (do not invent Head/Arms/Chest rows). Mechanics encoded:
+  every pet is base Warrior + a secondary by pet type (Water=Rogue,
+  Fire=Wizard, Earth=Ranger, Enchanter=Paladin, Beastlord=Berserker,
+  Necro/SK=Shadow Knight — user picks via the "pet 2nd class" dropdown).
+  It equips gear usable by its TWO base classes PLUS the player's trio
+  (up to FIVE classes), Attunable only (No-Drop excluded). Slots
+  auto-compute: 4 base + per-class modifiers (Beastlord/Magician +3,
+  Necro +2, Enchanter/Druid/Shaman +1) when a pet-summoning class is in
+  the combo; `pet_slots` field overrides. `/pet inventory check` (in the
+  outputs macro) is parsed as a burst -> `tracker.pet_inventory`; the gate
+  drops items already on the pet / not class-usable / not spare. Priorities
+  in the prompt: up to 2 weapons by damage/delay (procs/lifetap top),
+  haste belt, AC over HP, no duplicate categories, 510 stat cap. Pet gear
+  PERSISTS through death/re-summon. `pet_slots`/`pet_classes` are user-set
+  columns; controls live inline in the Equipment header.
 
 ## LLM runtime (backend/llm_runtime.py)
 
@@ -332,6 +373,14 @@ model selection itself is runtime-switchable in the UI.
   unpublished.
 
 ## Releasing
+
+Latest: **v1.7.0**. MCP server clone at `MCP_SERVER_DIR` is on ArtSabintsev
+**v1.3.4** (data snapshot refreshed twice weekly; stay on release tags, not
+main — post-1.3.4 has an unreleased TypeScript 6->7 bump). Update the MCP
+with `git merge --ff-only <tag> && npm install && npm run build` in its
+clone. Benign `eql_wiki_page returned isError` lines (pages that don't
+exist; HTTP fallback covers them) log at DEBUG.
+
 
 Bump `APP_VERSION` in backend/main.py AND frontend/lib/version.ts (same
 string), add a CHANGELOG.md section, commit, then `git tag vX.Y.Z` and push
