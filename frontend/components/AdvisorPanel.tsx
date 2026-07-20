@@ -377,31 +377,6 @@ export const AdvisorPanel = memo(function AdvisorPanel({
           />
         </div>
         <div className="adv-field">
-          <label htmlFor="adv-pet-slots" title="Your pet's equipment slot count (varies by class) — the gear consult builds it a loadout from your spare bags/bank items">Pet slots</label>
-          <input
-            id="adv-pet-slots"
-            type="number"
-            min={0}
-            placeholder="0"
-            value={petSlotsDraft}
-            onChange={(e) => setPetSlotsDraft(e.target.value)}
-            onBlur={() => numberPatch(petSlotsDraft, "pet_slots")}
-            onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
-          />
-        </div>
-        <div className="adv-field">
-          <label htmlFor="adv-pet-class" title="Your pet's equip class(es) — most pets are Warrior; some have a second like WAR/RNG. Gear the pet can wear is filtered by this.">Pet class</label>
-          <input
-            id="adv-pet-class"
-            type="text"
-            placeholder="Warrior"
-            value={petClassDraft}
-            onChange={(e) => setPetClassDraft(e.target.value)}
-            onBlur={() => patch({ pet_classes: petClassDraft.trim() || null })}
-            onKeyDown={(e) => e.key === "Enter" && patch({ pet_classes: petClassDraft.trim() || null })}
-          />
-        </div>
-        <div className="adv-field">
           <label htmlFor="adv-llm">Counsel model</label>
           <select
             id="adv-llm"
@@ -700,9 +675,34 @@ export const AdvisorPanel = memo(function AdvisorPanel({
               </div>
             )}
 
-            <div className="adv-section">
-              <h3>
-                Equipment
+            <div className="adv-section adv-gear-section">
+              <h3 className="adv-gear-head">
+                <span>Equipment</span>
+                <span className="adv-pet-inline" title="Pet equipment slot count and equip class — used only by the gear consult">
+                  <label>
+                    pet slots
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={petSlotsDraft}
+                      onChange={(e) => setPetSlotsDraft(e.target.value)}
+                      onBlur={() => numberPatch(petSlotsDraft, "pet_slots")}
+                      onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
+                    />
+                  </label>
+                  <label>
+                    pet class
+                    <input
+                      type="text"
+                      placeholder="Warrior"
+                      value={petClassDraft}
+                      onChange={(e) => setPetClassDraft(e.target.value)}
+                      onBlur={() => patch({ pet_classes: petClassDraft.trim() || null })}
+                      onKeyDown={(e) => e.key === "Enter" && patch({ pet_classes: petClassDraft.trim() || null })}
+                    />
+                  </label>
+                </span>
                 <button
                   type="button"
                   className="adv-rescan adv-gear-btn"
@@ -713,6 +713,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   {gearLoading ? "consulting…" : gear ? "re-consult gear" : "consult gear"}
                 </button>
               </h3>
+              {gearLoading && (
+                <div className="adv-gear-loading" role="status" aria-live="polite">
+                  <span className="adv-gear-spin" aria-hidden />
+                  Consulting — mining item stats from the wiki…
+                </div>
+              )}
               {gear?.stale && (
                 <div className="adv-stale">
                   Saved gear counsel from {gear.generated?.replace("T", " ") ?? "earlier"} —

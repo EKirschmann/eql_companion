@@ -1644,3 +1644,36 @@ button.app-version:hover { color: var(--gold-bright); }
   cursor: pointer;
 }
 .update-avail:hover { background: rgba(200, 170, 110, 0.12); }
+
+/* Equipment header: pet controls inline beside the consult button */
+.adv-gear-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.adv-pet-inline { display: inline-flex; gap: 10px; margin-left: auto; }
+.adv-pet-inline label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-dim, rgba(230, 222, 202, 0.55));
+}
+.adv-pet-inline input {
+  width: 58px; font-size: 12px; padding: 2px 5px;
+  background: rgba(8, 10, 13, 0.6); border: 1px solid var(--hairline-dim);
+  color: var(--ink, #e6dEca);
+}
+.adv-pet-inline input[type="number"] { width: 42px; }
+.adv-gear-btn { margin-left: 0; }
+/* loading veil over the (possibly still-shown) gear tables */
+.adv-gear-section { position: relative; }
+.adv-gear-loading {
+  position: absolute; left: 0; right: 0; top: 40px; bottom: 0;
+  background: rgba(12, 14, 18, 0.72);
+  display: flex; align-items: flex-start; justify-content: center;
+  gap: 10px; padding-top: 40px; z-index: 5;
+  font-size: 13px; color: var(--gold-bright);
+  backdrop-filter: blur(1.5px);
+}
+.adv-gear-spin {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid var(--hairline); border-top-color: var(--gold-bright);
+  animation: adv-spin 0.8s linear infinite;
+}
+@keyframes adv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .adv-gear-spin { animation: none; } }
