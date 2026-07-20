@@ -795,61 +795,47 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                 const petInv = snap?.pet_inventory ?? {};
                 const petGear = gear?.pet_gear ?? [];
                 if (!Object.keys(petInv).length && !petGear.length) return null;
-                // the pet's slots are ONLY what /pet inventory check shows —
-                // never invent slots the pet doesn't have
-                const petSlotKeys = Object.keys(petInv);
-                const petSlotSet = new Set(petSlotKeys.map((s) => s.toLowerCase()));
-                const bySlot: Record<string, { item: string; why: string; where?: string }> = {};
-                petGear.forEach((p) => {
-                  if (p.slot && petSlotSet.has(p.slot.toLowerCase()) && !bySlot[p.slot])
-                    bySlot[p.slot] = p;
-                });
-                const slots = petSlotKeys;
-                type Row = { slot: string; now: string | null; use: string | null; why: string; changed: boolean };
-                const rows: Row[] = slots.map((slot) => {
-                  const now = petInv[slot] ?? null;
-                  const sug = bySlot[slot];
-                  return {
-                    slot,
-                    now,
-                    use: sug ? sug.item : now,
-                    why: sug
-                      ? `${sug.why}${sug.where ? ` (${sug.where})` : ""}`
-                      : now
-                        ? "keep — nothing better the pet can use"
-                        : "empty",
-                    changed: !!sug,
-                  };
-                });
+                const held = Object.values(petInv);
+                const heldSet = new Set(held.map((v) => v.toLowerCase()));
+                const recs = petGear.filter((p) => !heldSet.has(p.item.toLowerCase()));
                 return (
                   <>
                     <div className="adv-sub" style={{ marginTop: 10 }}>
-                      Pet gear (Warrior{snap?.pet_classes ? `/${snap.pet_classes}` : ""}) — from /pet
-                      inventory check; suggested items persist through death &amp;
-                      re-summon
+                      Pet gear (Warrior{snap?.pet_classes ? `/${snap.pet_classes}` : ""})
+                      — up to {snap?.pet_slots ?? held.length} items; persists through
+                      death &amp; re-summon
                     </div>
-                    <table className="adv-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Slot</th>
-                          <th scope="col">Now</th>
-                          <th scope="col">Use</th>
-                          <th scope="col">Why</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => (
-                          <tr key={r.slot + (r.use ?? "")} data-dim={r.changed ? undefined : "1"}>
-                            <td className="adv-cls">{r.slot}</td>
-                            <td>{r.now || "—"}</td>
-                            <td>
-                              <strong>{r.use ?? "—"}</strong>
-                            </td>
-                            <td className="adv-why">{r.why}</td>
+                    {held.length > 0 && (
+                      <p className="adv-purchase">
+                        <span className="adv-cls">Now holding: </span>
+                        {held.join(" · ")}
+                      </p>
+                    )}
+                    {recs.length > 0 ? (
+                      <table className="adv-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Hand to pet</th>
+                            <th scope="col">Why</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {recs.map((p) => (
+                            <tr key={p.item}>
+                              <td>
+                                <strong>{p.item}</strong>
+                                {p.where && <span className="adv-cls"> ({p.where})</span>}
+                              </td>
+                              <td className="adv-why">{p.why}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="adv-purchase-note">
+                        Nothing better in your bags/bank for the pet right now.
+                      </p>
+                    )}
                   </>
                 );
               })()}
