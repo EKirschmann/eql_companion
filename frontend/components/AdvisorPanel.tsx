@@ -781,42 +781,74 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </ul>
                 </>
               )}
-              {snap?.pet_inventory && Object.keys(snap.pet_inventory).length > 0 && (
-                <>
-                  <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Pet currently equipped (from /pet inventory check)
-                  </div>
-                  <table className="adv-table">
-                    <tbody>
-                      {Object.entries(snap.pet_inventory).map(([slot, item]) => (
-                        <tr key={slot}>
-                          <td className="adv-cls">{slot}</td>
-                          <td>{item}</td>
+              {(() => {
+                const petInv = snap?.pet_inventory ?? {};
+                const petGear = gear?.pet_gear ?? [];
+                if (!Object.keys(petInv).length && !petGear.length) return null;
+                const bySlot: Record<string, { item: string; why: string; where?: string }> = {};
+                const noSlot: typeof petGear = [];
+                petGear.forEach((p) => {
+                  if (p.slot && !bySlot[p.slot]) bySlot[p.slot] = p;
+                  else if (!p.slot) noSlot.push(p);
+                });
+                const slots = Array.from(new Set([...Object.keys(petInv), ...Object.keys(bySlot)]));
+                type Row = { slot: string; now: string | null; use: string | null; why: string; changed: boolean };
+                const rows: Row[] = slots.map((slot) => {
+                  const now = petInv[slot] ?? null;
+                  const sug = bySlot[slot];
+                  return {
+                    slot,
+                    now,
+                    use: sug ? sug.item : now,
+                    why: sug
+                      ? `${sug.why}${sug.where ? ` (${sug.where})` : ""}`
+                      : now
+                        ? "keep — nothing better the pet can use"
+                        : "empty",
+                    changed: !!sug,
+                  };
+                });
+                noSlot.forEach((p) =>
+                  rows.push({
+                    slot: "—",
+                    now: null,
+                    use: p.item,
+                    why: `${p.why}${p.where ? ` (${p.where})` : ""}`,
+                    changed: true,
+                  }),
+                );
+                return (
+                  <>
+                    <div className="adv-sub" style={{ marginTop: 10 }}>
+                      Pet gear ({snap?.pet_classes || "Warrior"}) — from /pet
+                      inventory check; suggested items persist through death &amp;
+                      re-summon
+                    </div>
+                    <table className="adv-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Slot</th>
+                          <th scope="col">Now</th>
+                          <th scope="col">Use</th>
+                          <th scope="col">Why</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
-              {gear && (gear.pet_gear?.length ?? 0) > 0 && (
-                <>
-                  <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Suggested pet gear — hand these to the pet; it persists
-                    through death and re-summon
-                  </div>
-                  <ul className="adv-list">
-                    {gear.pet_gear!.map((p) => (
-                      <li key={p.item}>
-                        <strong>{p.item}</strong>
-                        {p.slot && <span className="adv-cls"> — {p.slot}</span>}
-                        {p.where && <span className="adv-cls"> ({p.where})</span>}
-                        <br />
-                        {p.why}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.slot + (r.use ?? "")} data-dim={r.changed ? undefined : "1"}>
+                            <td className="adv-cls">{r.slot}</td>
+                            <td>{r.now || "—"}</td>
+                            <td>
+                              <strong>{r.use ?? "—"}</strong>
+                            </td>
+                            <td className="adv-why">{r.why}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                );
+              })()}
               {gear && gear.farm.length > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>Where to farm upgrades</div>
