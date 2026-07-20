@@ -5,9 +5,9 @@ import { apiGet, apiSend } from "@/lib/api";
 import type { Advice, ExportsStatus, GearAdvice, HuntingData, LlmInfo, OwnedAAsInfo, Snapshot, SpellbookInfo } from "@/lib/types";
 
 const CLASSES = [
-  "Warrior", "Cleric", "Paladin", "Ranger", "Shadow Knight", "Druid",
-  "Monk", "Bard", "Rogue", "Shaman", "Necromancer", "Wizard",
-  "Magician", "Enchanter", "Beastlord", "Berserker",
+  "Bard", "Beastlord", "Berserker", "Cleric", "Druid", "Enchanter",
+  "Magician", "Monk", "Necromancer", "Paladin", "Ranger", "Rogue",
+  "Shadow Knight", "Shaman", "Warrior", "Wizard",
 ];
 
 const TRIO_LABELS = ["Primary", "Secondary", "Tertiary"] as const;
@@ -693,14 +693,18 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </label>
                   <label title="Every pet is base Warrior — set only its SECOND class (Water pet = Rogue, Earth pet = Ranger). Gear the pet can wear is Warrior OR this.">
                     pet 2nd class
-                    <input
-                      type="text"
-                      placeholder="e.g. Rogue"
+                    <select
                       value={petClassDraft}
-                      onChange={(e) => setPetClassDraft(e.target.value)}
-                      onBlur={() => patch({ pet_classes: petClassDraft.trim() || null })}
-                      onKeyDown={(e) => e.key === "Enter" && patch({ pet_classes: petClassDraft.trim() || null })}
-                    />
+                      onChange={(e) => {
+                        setPetClassDraft(e.target.value);
+                        patch({ pet_classes: e.target.value || null });
+                      }}
+                    >
+                      <option value="">Warrior only</option>
+                      {CLASSES.filter((c) => c !== "Warrior").map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                   </label>
                 </span>
                 <button
