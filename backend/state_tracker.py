@@ -50,6 +50,7 @@ class CharacterTracker:
         self.aa_available: Optional[int] = None  # unspent AA points (user-set; +1 per gain)
         self.spell_slots: Optional[int] = None   # spell slots unlocked via AAs (user-set)
         self.pet_slots: Optional[int] = None     # pet equipment slots (user-set)
+        self.pet_classes: Optional[str] = None   # pet's equip class(es), user-set
         self.zone: Optional[str] = None
         # Session counters (live events only)
         self.damage_dealt = 0
@@ -641,6 +642,7 @@ class CharacterTracker:
             "aa_available": self.aa_available,
             "spell_slots": self.spell_slots,
             "pet_slots": self.pet_slots,
+            "pet_classes": self.pet_classes,
             "pet_inventory": dict(self.pet_inventory),
             "loadout_hint": self.loadout_hint,
             "owned_aas": {

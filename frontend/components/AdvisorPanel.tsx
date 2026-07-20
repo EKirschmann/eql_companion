@@ -86,6 +86,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   const [aaDraft, setAaDraft] = useState("");
   const [slotsDraft, setSlotsDraft] = useState("");
   const [petSlotsDraft, setPetSlotsDraft] = useState("");
+  const [petClassDraft, setPetClassDraft] = useState("");
   const [book, setBook] = useState<SpellbookInfo | null>(null);
   const [ownedAAs, setOwnedAAs] = useState<OwnedAAsInfo | null>(null);
   const [exports, setExports] = useState<ExportsStatus | null>(null);
@@ -146,6 +147,9 @@ export const AdvisorPanel = memo(function AdvisorPanel({
   useEffect(() => {
     setPetSlotsDraft(snap?.pet_slots == null ? "" : String(snap.pet_slots));
   }, [snap?.pet_slots]);
+  useEffect(() => {
+    setPetClassDraft(snap?.pet_classes ?? "");
+  }, [snap?.pet_classes]);
 
   const patch = async (body: Record<string, unknown>) => {
     try {
@@ -383,6 +387,18 @@ export const AdvisorPanel = memo(function AdvisorPanel({
             onChange={(e) => setPetSlotsDraft(e.target.value)}
             onBlur={() => numberPatch(petSlotsDraft, "pet_slots")}
             onKeyDown={(e) => e.key === "Enter" && numberPatch(petSlotsDraft, "pet_slots")}
+          />
+        </div>
+        <div className="adv-field">
+          <label htmlFor="adv-pet-class" title="Your pet's equip class(es) — most pets are Warrior; some have a second like WAR/RNG. Gear the pet can wear is filtered by this.">Pet class</label>
+          <input
+            id="adv-pet-class"
+            type="text"
+            placeholder="Warrior"
+            value={petClassDraft}
+            onChange={(e) => setPetClassDraft(e.target.value)}
+            onBlur={() => patch({ pet_classes: petClassDraft.trim() || null })}
+            onKeyDown={(e) => e.key === "Enter" && patch({ pet_classes: petClassDraft.trim() || null })}
           />
         </div>
         <div className="adv-field">

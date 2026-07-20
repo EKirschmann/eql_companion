@@ -1166,36 +1166,54 @@ async def generate_gear_advice(ctx: dict) -> dict:
         + "; ".join(f"{k}: {v}" for k, v in sorted((ctx.get('worn') or {}).items())),
     ]
     pet_inv = ctx.get("pet_inventory") or {}
-    # the user-set slot count is authoritative; fall back to what the last
-    # /pet inventory check showed
     pet_slots = (ctx.get("pet_slots") or 0) or len(pet_inv)
+    # pet's equip class(es): user-set (e.g. an Earth pet is WAR/RNG), default
+    # Warrior — the base class every pet shares
+    pet_class_str = (ctx.get("pet_classes") or "Warrior").strip()
+    pet_classes = [c.strip() for c in re.split(r"[/,]", pet_class_str) if c.strip()]
     if pet_slots > 0:
-        if pet_inv:
-            cur = ("The pet CURRENTLY has equipped (from /pet inventory "
-                   "check): "
-                   + "; ".join(f"{s}: {i}" for s, i in sorted(pet_inv.items()))
-                   + f". It has {pet_slots} slots total. FILL every empty "
-                   "slot with the best owned item, and for a filled slot "
-                   "suggest a swap only when a bags/bank item is CLEARLY "
-                   "better. ")
-        else:
-            cur = (f"The pet has {pet_slots} equipment slots and is CURRENTLY "
-                   "EMPTY — outfit it: at least one weapon, then the best "
-                   "remaining armor, up to the slot count. ")
+        # deterministic pool: owned bags/bank gear the PET's class can equip
+        # (not the player's), with stats, not the player's worn gear, not
+        # exaltation hosts, not already on the pet
+        from backend.game_data import _trio_usable, item_line as _il
+        exalt_hosts_p = {(x.get("host") or "").lower()
+                         for x in (ctx.get("exaltations") or [])}
+        pet_now = {v.lower() for v in pet_inv.values()}
+        pool = []
+        for it in items:
+            if it.get("where") not in ("bags", "bank"):
+                continue
+            nm = it["name"]
+            if nm.lower() in pet_now or nm.lower() in exalt_hosts_p:
+                continue
+            line = await _il(nm)
+            if not line or _trio_usable(line, pet_classes) is False:
+                continue
+            if not re.search(r"AC: *[0-9]|DMG: *[0-9]|Skill:", line):
+                continue  # only real gear (armor/weapons)
+            pool.append(nm)
+        pool_txt = "; ".join(sorted(set(pool))[:40]) or "none"
+        cur = ("The pet CURRENTLY has: "
+               + ("; ".join(f"{s}: {i}" for s, i in sorted(pet_inv.items()))
+                  if pet_inv else "nothing")
+               + f". Slots: {pet_slots}. ")
         pet_block = (
-            "PET LOADOUT: " + cur +
-            "Pets equip items HANDED to them — weapons boost their damage "
-            "(procs work), armor their AC — and handed items are DESTROYED "
-            "when the pet dies or is re-summoned. Draw from bags/bank ONLY "
-            "(never the player's worn gear, never exaltation hosts). Put "
-            "each pick in 'pet_gear' with the item, slot, and a one-line "
-            "why. THE PLAYER ALWAYS HAS STAT PRIORITY: never assign the pet "
-            "an item that would beat something the player wears in a "
-            "comparable slot.")
+            f"PET LOADOUT — the pet's equip class is {pet_class_str} (NOT "
+            "the player's classes). Pet slots are FLEXIBLE (treat them like "
+            "generic slots — rank items by usefulness, don't force a rigid "
+            "slot-for-slot match): a weapon boosts pet damage (best "
+            "damage/delay, procs work), armor pieces add AC. " + cur +
+            "OWNED items the PET CAN EQUIP (bags/bank, already class-checked "
+            "for you): " + pool_txt + ". From THIS LIST ONLY, pick up to "
+            f"{pet_slots} that improve the pet over what it now has — one "
+            "weapon plus the best armor — each in 'pet_gear' as item + why. "
+            "Items are DESTROYED when the pet dies/re-summons. THE PLAYER "
+            "KEEPS STAT PRIORITY: never hand the pet something better than "
+            "the player's own worn gear in that slot.")
     else:
         pet_block = ("PET LOADOUT: none — pet_gear must be []. (The player "
-                     "sets their pet's slot count in the Advisor tab, or the "
-                     "app reads it from /pet inventory check.)")
+                     "sets their pet's slot count + class in the Advisor "
+                     "tab, or the app reads slots from /pet inventory check.)")
     prompt = (GEAR_PROMPT
               .replace("__PET_BLOCK__", pet_block)
               .replace("__CONTEXT__", chr(10).join(lines))
@@ -1299,18 +1317,26 @@ async def generate_gear_advice(ctx: dict) -> dict:
     for it in items:
         owned_locs.setdefault(it["name"].lower(), it.get("where"))
     pet_worn = {v.lower() for v in (ctx.get("pet_inventory") or {}).values()}
+    from backend.game_data import _trio_usable as _tu, item_line as _il2
     for ph in _clean_list(data.get("pet_gear"), ("item", "slot", "why"),
                           cap=max(0, int(pet_slots)),
                           require="item"):
-        if ph["item"].lower() in pet_worn:
-            continue  # already on the pet
         low = ph["item"].lower()
+        if low in pet_worn:
+            continue  # already on the pet
         where = owned_locs.get(low)
-        if where in ("bags", "bank") and low not in exalt_hosts:
-            ph["where"] = where
-            pet_gear.append(ph)
-        else:
-            logger.info("Dropped pet-gear rec: %s (%s)", ph["item"], where)
+        if where not in ("bags", "bank") or low in exalt_hosts:
+            logger.info("Dropped pet-gear rec (not spare): %s (%s)", ph["item"], where)
+            continue
+        try:
+            usable = _tu(await _il2(ph["item"]), pet_classes)
+        except Exception:
+            usable = None
+        if usable is False:
+            logger.info("Dropped pet-gear rec — pet class can't use: %s", ph["item"])
+            continue
+        ph["where"] = where
+        pet_gear.append(ph)
     table = _full_slot_table(slots, ctx.get("worn"))
     prim = next((r for r in table if r["slot"] == "Primary"
                  and r.get("recommend")), None)
