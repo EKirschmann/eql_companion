@@ -130,6 +130,7 @@ class CharacterTracker:
         # spells this character has been SEEN casting (log evidence)
         self.spell_casts: set = set()
         self.crits = 0
+        self.coin_copper = 0  # session coin total, all sources (in copper)
         self._pending_coin: Optional[tuple] = None  # (ts, copper) pre-kill
 
     def _touch_encounter(self, ts: datetime) -> None:
@@ -477,6 +478,7 @@ class CharacterTracker:
                         stats["loots"].append(e.item)
             elif isinstance(e, ev.Coin):
                 copper = _coin_copper(e.amount)
+                self.coin_copper += copper
                 if copper and not e.vendor and not e.from_item:
                     # corpse coin prints just BEFORE its kill line — hold
                     # it for forward attribution exactly like XP
@@ -802,6 +804,7 @@ class CharacterTracker:
                 "aa_points": self.aa_points,
                 "skill_ups": self.skill_ups,
                 "crits": self.crits,
+                "coin_copper": self.coin_copper,
                 "hit_rate": round(
                     100 * self.swings_hit / max(self.swings_hit + self.swings_missed, 1), 1),
                 "loots": list(self.loots),

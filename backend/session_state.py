@@ -32,7 +32,7 @@ PERSIST_FIELDS = [
     "encounter_history", "unknown_casts", "loadout_hint", "last_death",
     "mob_stats", "_last_kill", "_pending_xp", "_pending_coin",
     "who_roster", "pet_owners", "pet_inventory", "owned_aas",
-    "spell_casts", "crits",
+    "spell_casts", "crits", "coin_copper",
     "_last_aa_seen", "_last_aa_name",
 ]
 _DEQUES = {"loots": 20, "ledger": 300, "encounter_history": 5}

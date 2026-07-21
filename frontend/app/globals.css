@@ -506,6 +506,8 @@ body {
 
 .enc-table tr[data-kind="spell"] .enc-rule,
 .enc-table tr[data-kind="dot"] .enc-rule { background: var(--cast); }
+.enc-table tr[data-kind="ds"] .enc-rule { background: var(--milestone); }
+.enc-crit { color: var(--milestone); font-size: 0.85em; }
 
 .enc-tag {
   font-size: 9px;

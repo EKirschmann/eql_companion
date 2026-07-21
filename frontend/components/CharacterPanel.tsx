@@ -10,6 +10,18 @@ const PLAYSTYLES = [
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
+/** 3267 copper -> "3p 2g 6s 7c" (zero denominations omitted). */
+const fmtCoin = (c: number) => {
+  if (!c) return "0c";
+  const parts = [
+    [Math.floor(c / 1000), "p"],
+    [Math.floor((c % 1000) / 100), "g"],
+    [Math.floor((c % 100) / 10), "s"],
+    [c % 10, "c"],
+  ] as const;
+  return parts.filter(([n]) => n > 0).map(([n, u]) => `${n}${u}`).join(" ") || "0c";
+};
+
 export const CharacterPanel = memo(function CharacterPanel({
   snap,
   onSnapChange,
@@ -138,6 +150,14 @@ export const CharacterPanel = memo(function CharacterPanel({
             <div className="tile-value">{s.skill_ups}</div>
             <div className="tile-label">Skill-ups</div>
           </div>
+          <div className="tile" data-accent="milestone">
+            <div className="tile-value">{fmtCoin(s.coin_copper ?? 0)}</div>
+            <div className="tile-label">Coin earned</div>
+          </div>
+          <div className="tile" data-accent="out">
+            <div className="tile-value">{s.crits ?? 0}</div>
+            <div className="tile-label">Crits ✦</div>
+          </div>
         </div>
 
         {s.loots.length > 0 && (
@@ -160,6 +180,10 @@ export const CharacterPanel = memo(function CharacterPanel({
                   <th scope="col">Mob</th>
                   <th scope="col">Kills</th>
                   <th scope="col">XP</th>
+                  <th scope="col">Coin</th>
+                  <th scope="col" title="Observed drop rate — items dropped / kills">
+                    Drops
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -171,6 +195,12 @@ export const CharacterPanel = memo(function CharacterPanel({
                     <td className="hunt-name">{m.name}</td>
                     <td>{m.kills}</td>
                     <td>{m.xp_percent > 0 ? `${m.xp_percent.toFixed(1)}%` : "—"}</td>
+                    <td>{m.coin_copper ? fmtCoin(m.coin_copper) : "—"}</td>
+                    <td>
+                      {m.kills > 0 && (m.loot_drops ?? 0) > 0
+                        ? `${Math.round((100 * (m.loot_drops ?? 0)) / m.kills)}%`
+                        : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

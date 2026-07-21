@@ -10,13 +10,17 @@ export interface SessionStats {
   aa_points: number;
   skill_ups: number;
   hit_rate: number;
+  crits: number;
+  /** Session coin from all sources (corpse/split/vendor), in copper. */
+  coin_copper: number;
   loots: string[];
 }
 
 export interface EncounterAbility {
   name: string;
-  kind: "melee" | "spell" | "dot" | "pet" | "heal";
+  kind: "melee" | "spell" | "dot" | "pet" | "heal" | "ds";
   hits: number;
+  crits?: number;
   total: number;
   avg: number;
   dps: number;
@@ -55,6 +59,10 @@ export interface MobStat {
   kills: number;
   xp_percent: number;
   loots: string[];
+  /** Coin attributed to this mob (copper). */
+  coin_copper?: number;
+  /** Items dropped (count) — with kills, an observed drop rate. */
+  loot_drops?: number;
 }
 
 export interface EncounterAlly {
@@ -69,6 +77,8 @@ export interface EncounterAlly {
 export interface Encounter {
   in_hits?: number;
   defense?: Record<string, number>;
+  /** Spell name -> times the foe resisted it this fight. */
+  resists?: Record<string, number>;
   active: boolean;
   started: string;
   allies: EncounterAlly[];

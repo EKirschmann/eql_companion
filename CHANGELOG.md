@@ -4,6 +4,22 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.9.1 — 2026-07-21
+
+The panels catch up with everything v1.9.0 started tracking:
+
+- **Vitals & Session**: new "Coin earned" tile — a real session money
+  total (corpse coin + group splits + vendor sales, shown as
+  "3p 2g 6s 7c") that survives restarts — and a "Crits ✦" tile.
+- **Session hunting table**: per-mob Coin and Drops columns — Drops is
+  your observed drop rate (items dropped ÷ kills), so farming spots
+  show their real yield; hovering a row still lists the items.
+- **Encounter panel**: ability rows show per-ability crit counts
+  ("12 ✦3") in the current fight, the pet section, and the last-5-
+  fights aggregate; a "resisted" line lists which spells the foe
+  resisted and how often; damage-shield damage appears as its own
+  gold-accented row instead of hiding in the totals; and lifetap
+  self-healing (synthesized in v1.9.0) shows in the Healing section.
 ## v1.9.0 — 2026-07-21
 
 Big combat-log accuracy release: the parser now recognizes a large set

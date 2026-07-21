@@ -16,7 +16,7 @@ function AbilityTable({ abilities, petSection }: { abilities: EncounterAbility[]
       <thead>
         <tr>
           <th scope="col">Ability</th>
-          <th scope="col" title="Successful hits / casts">×</th>
+          <th scope="col" title="Successful hits / casts · ✦ = crits">×</th>
           <th scope="col">Avg</th>
           <th scope="col">Total</th>
           <th scope="col">DPS</th>
@@ -29,11 +29,15 @@ function AbilityTable({ abilities, petSection }: { abilities: EncounterAbility[]
               <span className="enc-rule" aria-hidden />
               {petSection ? a.name.replace(/^Pet: /, "") : a.name}
               {a.kind === "dot" && <span className="enc-tag">{a.kind}</span>}
+              {a.kind === "ds" && <span className="enc-tag">ds</span>}
               {!petSection && a.kind === "pet" && (
                 <span className="enc-tag">{a.kind}</span>
               )}
             </td>
-            <td className="enc-count">{a.hits}</td>
+            <td className="enc-count">
+              {a.hits}
+              {(a.crits ?? 0) > 0 && <span className="enc-crit"> ✦{a.crits}</span>}
+            </td>
             <td>{fmt(a.avg)}</td>
             <td>{fmt(a.total)}</td>
             <td>{a.dps}</td>
@@ -152,6 +156,14 @@ export const EncounterPanel = memo(function EncounterPanel({
                   </div>
                 );
               })()}
+              {enc.resists && Object.keys(enc.resists).length > 0 && (
+                <div className="enc-defense">
+                  resisted —{" "}
+                  {Object.entries(enc.resists)
+                    .map(([sp, n]) => (n > 1 ? `${sp} ×${n}` : sp))
+                    .join(" · ")}
+                </div>
+              )}
               {foes.length > 1 && (
                 <ul className="enc-foes" aria-label="Foes in this encounter">
                   {foes.map((f) => (
