@@ -24,11 +24,12 @@ class ZoneChange(LogEvent):
 
 
 class MeleeOut(LogEvent):
-    """You <verb> <target> for N points of damage."""
+    """You <verb> <target> for N points of damage. [(Critical) ...]"""
     type: str = "melee_out"
     verb: str
     target: str
     damage: int
+    crit: bool = False
 
 
 class MeleeIn(LogEvent):
@@ -37,6 +38,7 @@ class MeleeIn(LogEvent):
     attacker: str
     verb: str
     damage: int
+    crit: bool = False
 
 
 class SpellDamageOut(LogEvent):
@@ -46,6 +48,7 @@ class SpellDamageOut(LogEvent):
     damage: int
     damage_kind: str
     spell: str
+    crit: bool = False
 
 
 class SpellDamageIn(LogEvent):
@@ -54,6 +57,7 @@ class SpellDamageIn(LogEvent):
     damage: int
     damage_kind: str
     spell: str
+    crit: bool = False
 
 
 class NonMeleeDamage(LogEvent):
@@ -70,10 +74,12 @@ class CastBegin(LogEvent):
 
 class CastInterrupted(LogEvent):
     type: str = "interrupt"
+    spell: Optional[str] = None  # "Your Force Snap spell is interrupted."
 
 
 class CastFizzle(LogEvent):
     type: str = "fizzle"
+    spell: Optional[str] = None  # "Your Cascade of Hail spell fizzles!"
 
 
 class Kill(LogEvent):
@@ -100,11 +106,15 @@ class ExpGain(LogEvent):
 
 
 class DotDamage(LogEvent):
-    """<target> has taken N damage from your <spell>."""
+    """<target> has taken N damage from your <spell> — or the casterless
+    proc form "<target> has taken N damage by <spell>" (proc=True), which
+    is OURS unless the target is a player, YOU, or our own pet."""
     type: str = "dot_out"
     target: str
     damage: int
     spell: str
+    crit: bool = False
+    proc: bool = False
 
 
 class MissOut(LogEvent):
@@ -151,6 +161,7 @@ class OtherDamageOut(LogEvent):
     target: str
     damage: int
     source: str  # melee verb or spell name
+    crit: bool = False
 
 
 class PetInvHeader(LogEvent):
@@ -184,9 +195,13 @@ class MissIn(LogEvent):
 
 
 class Coin(LogEvent):
-    """You receive 7 copper from the corpse."""
+    """Corpse coin, group split, vendor sale, or loot-window item sale."""
     type: str = "coin"
     amount: str
+    split: bool = False              # "... as your split."
+    vendor: Optional[str] = None     # "from Lanadin for the X(s)."
+    item: Optional[str] = None       # the item a vendor sale was for
+    from_item: bool = False          # "You received ... from that item."
 
 
 class LocUpdate(LogEvent):
@@ -203,7 +218,10 @@ class LevelUp(LogEvent):
 
 
 class AAPoint(LogEvent):
+    """Optionally carries the log's own running total ("You now have N
+    ability points.") — authoritative for the unspent-points counter."""
     type: str = "aa"
+    total: Optional[int] = None
 
 
 class SkillUp(LogEvent):
@@ -215,10 +233,12 @@ class SkillUp(LogEvent):
 class Loot(LogEvent):
     type: str = "loot"
     item: str
+    count: int = 1                     # "You looted 2 Spider Silk ..."
     source: Optional[str] = None       # "the thaumaturgist's corpse"
     upgraded_to: Optional[str] = None  # EQL upgrade system: "... to create X +3"
     sold: bool = False                 # loot-and-auto-sell variant
     sold_for: Optional[str] = None     # "4 platinum, 2 gold, 1 silver"
+    stored: Optional[str] = None       # "... and stored it in your <depot>"
 
 
 class BuffFade(LogEvent):
@@ -257,3 +277,48 @@ class CharacterInfo(LogEvent):
     level: int
     class_str: str
     race: Optional[str] = None
+
+class DamageShieldOut(LogEvent):
+    """<target> is burned by YOUR <kind> for N points of non-melee damage.
+    Aux damage: counts toward totals/DPS but never swings or crit rates."""
+    type: str = "ds_out"
+    target: str
+    kind: str
+    damage: int
+
+
+class Resist(LogEvent):
+    """Out: '<target> resisted your <spell>!'; in: 'You resist <src>'s
+    <spell>!'."""
+    type: str = "resist"
+    direction: str                 # "out" | "in"
+    spell: str
+    target: Optional[str] = None   # out: who resisted
+    source: Optional[str] = None   # in: whose spell we shrugged off
+
+
+class Faction(LogEvent):
+    """Your faction standing with <faction> has been adjusted by <delta>."""
+    type: str = "faction"
+    faction: str
+    delta: int
+
+
+class ItemMerge(LogEvent):
+    """EQL upgrade crafting: 'merged two items ... create a new item: X'."""
+    type: str = "merge"
+    item: str
+
+
+class Destroyed(LogEvent):
+    """Advanced-loot destroy; the 'from that item' coin line follows it."""
+    type: str = "destroyed"
+    item: str
+    count: int = 1
+
+
+class PetAttack(LogEvent):
+    """'<pet> told you, "Attacking X Master."' — printed ONLY to the
+    owner's log, so it maps the pet with zero user action."""
+    type: str = "pet_attack"
+    pet: str

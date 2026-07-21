@@ -4,6 +4,52 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.9.0 — 2026-07-21
+
+Big combat-log accuracy release: the parser now recognizes a large set
+of real EQL line formats it previously dropped (found by studying two
+excellent community projects — EQBuddy and eql-log-reader), pets map
+themselves with zero setup, and the game's own spell file grounds proc
+and lifetap detection.
+
+- **Damage numbers are more complete.** Newly parsed: incoming DoT
+  ticks (damage you take from dots was invisible before), plain and
+  incoming non-melee nukes, damage shields in all three directions
+  (yours counts toward damage/DPS but never inflates swing accuracy),
+  and casterless proc/poison ticks. One real log had 38,000+ damage
+  shield hits that were simply missing.
+- **Crits are tracked.** Trailing tags — "(Critical)", stacked
+  "(Riposte) (Critical)", "(Crippling Blow)" — are recognized, counted
+  per session and per ability, and marked with ✦ in the War Ledger.
+- **More of the world parses**: named spell fizzles and interrupts
+  (bard forms too), resists in both directions (shown per fight),
+  faction hits, item merges, advanced-loot destroys, group coin
+  splits, vendor sales, multi-stack auto-sells, banked-to-depot loot,
+  and Berserker frenzy / cleave / smite / reave / shoot verbs. The
+  "You now have N ability points" total now drives the unspent-AA
+  counter authoritatively.
+- **Chat can no longer pollute combat stats**: speech lines are
+  excluded before combat matching, so players quoting combat text in
+  /say or /tell don't register as damage.
+- **Pets map themselves.** The pet's own "Attacking X Master." tell
+  (printed only to your log) registers it automatically — no /pet
+  leader needed (it still works). Charm handling: a "pet" that turns
+  on you un-maps instantly; slain pets un-map.
+- **The game's spell file grounds the tricky calls** (spells_us.txt,
+  read from the game folder — nothing installed): exaltation effects
+  that are also scribed spells now label "(exaltation)" when the data
+  says proc-granted and you never cast them; and lifetap self-healing
+  is synthesized — your own taps log no heal line at all, so that
+  healing never counted before.
+- **Fairer XP and coin attribution**: corpse coin now converts to
+  copper and credits the mob like XP does; rewards that print AFTER a
+  kill (looting the corpse later, trailing party XP) fall back to that
+  kill instead of being dropped. Per-mob stats now track coin and
+  drop counts.
+- Log reading hardened: correct cp1252 decoding (accented names no
+  longer risk breaking parses), a log-staleness signal on /health, and
+  the game folder is auto-discovered from the Daybreak registry entry
+  when the configured path doesn't exist.
 ## v1.8.0 — 2026-07-21
 
 - **Gear advice now uses REAL +N stats.** The wiki's Item Level slider

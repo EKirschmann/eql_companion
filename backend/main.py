@@ -43,6 +43,7 @@ from backend.spellbook import (clear_find_cache, exports_status,
                                load_export, load_spellbook)
 from backend.state_tracker import CharacterTracker
 from backend.ws_manager import ws_manager
+from backend import spell_file
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -203,6 +204,7 @@ async def switch_character(file_name: str) -> bool:
     if ocr_watcher:
         ocr_watcher.tracker = tracker
     _advice_cache = _advice_sig = None
+    asyncio.create_task(asyncio.to_thread(spell_file.load, settings.eql_game_dir))
     asyncio.create_task(_load_exalt_effects())
     await ws_manager.broadcast({"type": "state", "data": tracker.snapshot()})
     logger.info(f"Switched to {tracker.name} ({tracker.server})")
@@ -282,16 +284,20 @@ async def _load_exalt_effects() -> None:
             if m:
                 names.add(m.group(1).strip().lower())
         # stones whose effect is ALSO a scribed spell (Drones of Doom etc.)
-        # stay unlabeled: a cast and a proc are indistinguishable in the log,
-        # and mislabeling real casts is the worse error
+        # are AMBIGUOUS: the tracker labels them only when the client spell
+        # file marks the effect proc-granted AND this session never saw a
+        # cast of it (see CharacterTracker._fx_label)
         book = load_spellbook(tracker.name, tracker.server)
+        scribed = set()
         if book:
             scribed = {s["name"].lower() for s in book.get("castable", [])}
             scribed |= {n.lower() for n in book.get("other_loadouts") or []}
-            names -= scribed
-        tracker.exalt_effects = names
+        tracker.exalt_ambiguous = names & scribed
+        tracker.exalt_effects = names - scribed
         if names:
-            logger.info("Exaltation proc effects: %s", ", ".join(sorted(names)))
+            logger.info("Exaltation proc effects: %s (ambiguous: %s)",
+                        ", ".join(sorted(tracker.exalt_effects)) or "none",
+                        ", ".join(sorted(tracker.exalt_ambiguous)) or "none")
     except Exception:
         logger.exception("Exaltation-effect load failed")
 
@@ -303,7 +309,7 @@ async def on_log_event(event: ev.LogEvent, live: bool) -> None:
         return
 
     if event.type in ("other_out", "aa_list", "aa_meta", "who_other",
-                      "pet_inv_header", "pet_gear"):
+                      "pet_inv_header", "pet_gear", "pet_attack"):
         return  # aggregated into tracker state; raw broadcast would flood the WS
 
     if event.type == "cast":
@@ -495,6 +501,8 @@ async def lifespan(app: FastAPI):
             f"No EQL log found in {settings.eql_log_dir} — running without live data")
 
     _load_advice_cache()  # consults survive restarts
+    tasks.append(asyncio.create_task(
+        asyncio.to_thread(spell_file.load, settings.eql_game_dir)))
     tasks.append(asyncio.create_task(_load_exalt_effects()))
     ocr_watcher = OcrWatcher(tracker, ws_manager)
     tasks.append(asyncio.create_task(ocr_watcher.run()))
@@ -513,7 +521,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.8.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.9.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -558,7 +566,12 @@ class CharacterPatch(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "watching": watcher.path.name if watcher else None}
+    growth = watcher.last_growth if watcher else None
+    return {"status": "ok",
+            "watching": watcher.path.name if watcher else None,
+            "log_last_growth": growth.isoformat() if growth else None,
+            "log_stalled_s": (round((datetime.now() - growth).total_seconds())
+                              if growth else None)}
 
 
 @app.get("/api/character")

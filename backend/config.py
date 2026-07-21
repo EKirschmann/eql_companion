@@ -4,6 +4,34 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _registry_game_dir() -> str | None:
+    """EQL install dir from the Daybreak uninstall key (DisplayIcon /
+    UninstallString point at an exe inside it). Fail-soft: None off
+    Windows or when the key is absent."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    subkey = (r"Microsoft\Windows\CurrentVersion\Uninstall"
+              r"\DGC-EverQuest Legends")
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for root in ("SOFTWARE", r"SOFTWARE\WOW6432Node"):
+            try:
+                with winreg.OpenKey(hive, root + "\\" + subkey) as k:
+                    for value in ("DisplayIcon", "UninstallString"):
+                        try:
+                            raw, _ = winreg.QueryValueEx(k, value)
+                        except OSError:
+                            continue
+                        exe = str(raw).strip().strip('"').split('"')[0]
+                        parent = Path(exe).parent
+                        if parent.is_dir():
+                            return str(parent)
+            except OSError:
+                continue
+    return None
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
@@ -34,6 +62,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _derive_game_paths(self):
         game = Path(self.eql_game_dir)
+        if not game.is_dir():
+            # custom install path: the Daybreak uninstall registry key
+            # names the real dir — zero-config discovery (Windows only)
+            reg = _registry_game_dir()
+            if reg:
+                self.eql_game_dir = reg
+                game = Path(reg)
         if not self.eql_log_dir:
             self.eql_log_dir = str(game / "Logs")
         if not self.eql_maps_dir:

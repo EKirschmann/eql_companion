@@ -7,6 +7,7 @@ offset so partial lines and UTF-8 edge bytes never corrupt parsing.
 """
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -45,6 +46,9 @@ class LogWatcher:
         self._offset = 0
         self._pending = b""
         self._running = False
+        # wall-clock of the last byte growth — /health staleness signal
+        # ("is /log even on?")
+        self.last_growth: Optional[datetime] = None
 
     async def seed(self) -> None:
         """Replay the tail of the file (no broadcasting) to build initial state."""
@@ -61,7 +65,7 @@ class LogWatcher:
         if start > 0 and lines:
             lines = lines[1:]  # drop the partial first line
         for bline in lines:
-            line = bline.decode("utf-8", errors="replace")
+            line = bline.decode("cp1252", errors="replace")
             event = parse_line(line, self.character_name)
             if event:
                 await self.on_event(event, False)
@@ -84,6 +88,7 @@ class LogWatcher:
                 self._pending = b""
 
             if size > self._offset:
+                self.last_growth = datetime.now()
                 with open(self.path, "rb") as f:
                     f.seek(self._offset)
                     chunk = f.read(size - self._offset)
@@ -92,7 +97,7 @@ class LogWatcher:
                 lines = data.split(b"\n")
                 self._pending = lines.pop()  # last element is "" or a partial line
                 for bline in lines:
-                    line = bline.decode("utf-8", errors="replace")
+                    line = bline.decode("cp1252", errors="replace")
                     event = parse_line(line, self.character_name)
                     if event:
                         try:

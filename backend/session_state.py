@@ -30,8 +30,9 @@ PERSIST_FIELDS = [
     "swings_hit", "swings_missed", "loots", "last_target", "last_event_at",
     "position", "session_max_dps", "ledger", "encounter",
     "encounter_history", "unknown_casts", "loadout_hint", "last_death",
-    "mob_stats", "_last_kill", "_pending_xp", "who_roster", "pet_owners",
-    "pet_inventory", "owned_aas",
+    "mob_stats", "_last_kill", "_pending_xp", "_pending_coin",
+    "who_roster", "pet_owners", "pet_inventory", "owned_aas",
+    "spell_casts", "crits",
     "_last_aa_seen", "_last_aa_name",
 ]
 _DEQUES = {"loots": 20, "ledger": 300, "encounter_history": 5}
@@ -87,4 +88,6 @@ def restore(tracker, data: dict) -> None:
             v = deque(v, maxlen=_DEQUES[f])
         elif f == "_last_kill" and v is not None:
             v = tuple(v)
+        elif f == "spell_casts" and v is not None:
+            v = set(v)
         setattr(tracker, f, v)

@@ -4,16 +4,28 @@ Seed events (log history replayed at startup) establish zone/level/class
 and pre-fill the ledger buffer; only LIVE events count toward session
 stats (kills, damage, DPS) so numbers reflect this play session.
 """
+import re
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Optional
 
+from backend import spell_file
 from backend.log_system import events as ev
 from backend.log_system.parser import CLASS_ABBREV
 
 DPS_WINDOW_SECONDS = 60
 COMBAT_TIMEOUT_SECONDS = 8
 LEDGER_SIZE = 300
+REWARD_WINDOW_SECONDS = 3  # XP/coin <-> kill attribution window
+
+_COIN_RE = re.compile(r"(\d+)\s+(platinum|gold|silver|copper)")
+_COIN_VALUE = {"platinum": 1000, "gold": 100, "silver": 10, "copper": 1}
+
+
+def _coin_copper(amount: str) -> int:
+    """'3 gold, 5 silver and 7 copper' -> 357 (copper)."""
+    return sum(int(n) * _COIN_VALUE[d]
+               for n, d in _COIN_RE.findall(amount or ""))
 
 _FULL_TO_ABBR = {v.lower(): k for k, v in CLASS_ABBREV.items()}
 
@@ -112,6 +124,13 @@ class CharacterTracker:
         # lowercase effect names granted by owned exaltation stones — damage
         # "by <one of these>" is a proc, labeled "(exaltation)" in the parse
         self.exalt_effects: set = set()
+        # exalt effects that are ALSO scribed spells: labeled only when the
+        # client spell file marks them proc-granted AND no cast was seen
+        self.exalt_ambiguous: set = set()
+        # spells this character has been SEEN casting (log evidence)
+        self.spell_casts: set = set()
+        self.crits = 0
+        self._pending_coin: Optional[tuple] = None  # (ts, copper) pre-kill
 
     def _touch_encounter(self, ts: datetime) -> None:
         if (self.encounter is None or
@@ -127,18 +146,50 @@ class CharacterTracker:
         else:
             self.encounter["last"] = ts
 
-    def _absorb_pending_xp(self, mob: str, ts: datetime) -> None:
-        """XP lines precede their kill line in EQL — claim one held within 3s."""
-        if self._pending_xp and (ts - self._pending_xp[0]).total_seconds() <= 3:
-            self.mob_stats.setdefault(
-                mob, {"kills": 0, "xp_percent": 0.0, "loots": []},
-            )["xp_percent"] += self._pending_xp[1]
+    def _mob(self, mob: str) -> dict:
+        stats = self.mob_stats.setdefault(
+            mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
+        stats.setdefault("coin_copper", 0)   # restored sessions may lack
+        stats.setdefault("loot_drops", 0)    # the newer counters
+        return stats
+
+    def _absorb_pending_rewards(self, mob: str, ts: datetime) -> None:
+        """XP/coin lines precede their kill line in EQL — claim any held
+        within the reward window (forward attribution; _sweep_pending is
+        the post-kill fallback)."""
+        if (self._pending_xp and
+                (ts - self._pending_xp[0]).total_seconds() <= REWARD_WINDOW_SECONDS):
+            self._mob(mob)["xp_percent"] += self._pending_xp[1]
         self._pending_xp = None
+        if (self._pending_coin and
+                (ts - self._pending_coin[0]).total_seconds() <= REWARD_WINDOW_SECONDS):
+            self._mob(mob)["coin_copper"] += self._pending_coin[1]
+        self._pending_coin = None
+
+    def _sweep_pending(self, ts: datetime) -> None:
+        """Rewards whose window expired with NO kill line following fall
+        BACK to the kill just before them — covers loot-the-corpse-later
+        coin and trailing party XP without mis-crediting chain pulls
+        (a forward claim always wins; this only runs at expiry)."""
+        for attr, key in (("_pending_xp", "xp_percent"),
+                          ("_pending_coin", "coin_copper")):
+            pend = getattr(self, attr)
+            if pend and (ts - pend[0]).total_seconds() > REWARD_WINDOW_SECONDS:
+                if (self._last_kill and 0 <= (pend[0] - self._last_kill[1])
+                        .total_seconds() <= REWARD_WINDOW_SECONDS):
+                    self._mob(self._last_kill[0])[key] += pend[1]
+                setattr(self, attr, None)
 
     def _fx_label(self, spell: str) -> str:
         """Exaltation procs share the spell-damage line shape — the effect
-        name gives them away."""
-        if spell and spell.lower() in self.exalt_effects:
+        name gives them away. Names that are ALSO scribed label only when
+        the client spell file marks them proc-granted AND this session
+        never saw a cast (log evidence beats static data)."""
+        low = (spell or "").lower()
+        if low in self.exalt_effects:
+            return f"{spell} (exaltation)"
+        if (low in self.exalt_ambiguous and low not in self.spell_casts
+                and spell_file.is_proc(low)):
             return f"{spell} (exaltation)"
         return spell
 
@@ -153,12 +204,16 @@ class CharacterTracker:
         hl["total"] += amount
 
     def _encounter_ability(self, ts: datetime, name: str, kind: str, damage: int,
-                           target: Optional[str] = None) -> None:
+                           target: Optional[str] = None,
+                           crit: bool = False) -> None:
         self._touch_encounter(ts)
         enc = self.encounter
-        ab = enc["abilities"].setdefault(name, {"kind": kind, "hits": 0, "total": 0})
+        ab = enc["abilities"].setdefault(
+            name, {"kind": kind, "hits": 0, "total": 0, "crits": 0})
         ab["hits"] += 1
         ab["total"] += damage
+        if crit:
+            ab["crits"] = ab.get("crits", 0) + 1
         enc["total_out"] += damage
         if target:
             enc["target"] = target
@@ -216,6 +271,16 @@ class CharacterTracker:
             if self.pet_owners.get(e.pet) != e.owner:
                 self.pet_owners[e.pet] = e.owner
                 self.pet_owners_dirty = True
+        elif isinstance(e, ev.PetAttack):
+            # the pet tells ONLY its master — zero-config mapping, no
+            # /pet leader needed
+            self.pet_hint = False
+            if self.pet_owners.get(e.pet) != self.name:
+                self.pet_owners[e.pet] = self.name
+                self.pet_owners_dirty = True
+        elif isinstance(e, ev.CastBegin):
+            if e.spell:  # log evidence for proc-vs-cast disambiguation
+                self.spell_casts.add(e.spell.lower())
         elif isinstance(e, ev.AAListEntry):
             # ownership data, not session data: applies in seed replay too.
             # Skip listings OLDER than what we already hold (e.g. the seed
@@ -247,20 +312,47 @@ class CharacterTracker:
 
         if live:
             self.last_event_at = e.ts
-            if isinstance(e, (ev.MeleeOut, ev.SpellDamageOut, ev.DotDamage)):
+            self._sweep_pending(e.ts)
+            if isinstance(e, ev.DotDamage) and e.proc and (
+                    e.target.lower() == "you"
+                    or e.target in self.who_roster
+                    or (self.pet_owners.get(e.target) or "").lower()
+                    == (self.name or "").lower()):
+                # casterless proc tick aimed at us / a player / our own
+                # pet — not our outgoing damage
+                if e.target.lower() == "you":
+                    self.damage_taken += e.damage
+            elif isinstance(e, (ev.MeleeOut, ev.SpellDamageOut, ev.DotDamage)):
                 self.damage_dealt += e.damage
                 self.last_target = e.target
                 self._dmg_window.append((e.ts, e.damage))
+                if e.crit:
+                    self.crits += 1
                 if isinstance(e, ev.MeleeOut):
                     self.swings_hit += 1
                     self._encounter_ability(e.ts, e.verb.capitalize(), "melee",
-                                            e.damage, e.target)
+                                            e.damage, e.target, crit=e.crit)
                 elif isinstance(e, ev.SpellDamageOut):
                     self._encounter_ability(e.ts, self._fx_label(e.spell),
-                                            "spell", e.damage, e.target)
+                                            "spell", e.damage, e.target,
+                                            crit=e.crit)
                 else:  # DotDamage
                     self._encounter_ability(e.ts, self._fx_label(e.spell),
-                                            "dot", e.damage, e.target)
+                                            "dot", e.damage, e.target,
+                                            crit=e.crit)
+                # own lifetaps log NO heal line — synthesize the self-heal
+                # 1:1 from the damage (the client spell file flags taps)
+                spell = getattr(e, "spell", None)
+                if spell and spell_file.is_lifetap(spell):
+                    self.healing_received += e.damage
+                    self._encounter_heal(e.ts, f"{spell} (lifetap) — You",
+                                         e.damage)
+            elif isinstance(e, ev.DamageShieldOut):
+                # aux damage: counts to totals/DPS, never swings or crits
+                self.damage_dealt += e.damage
+                self._dmg_window.append((e.ts, e.damage))
+                self._encounter_ability(e.ts, f"Damage Shield ({e.kind})",
+                                        "ds", e.damage, e.target)
             elif isinstance(e, ev.MissOut):
                 self.swings_missed += 1
             elif isinstance(e, ev.OtherDamageOut):
@@ -292,6 +384,11 @@ class CharacterTracker:
                         allies[who] = allies.get(who, 0) + e.damage
             elif isinstance(e, (ev.MeleeIn, ev.SpellDamageIn)):
                 self.damage_taken += e.damage
+                # a "pet" that hits US is charmed no longer — drop the claim
+                if ((self.pet_owners.get(e.attacker) or "").lower()
+                        == (self.name or "").lower()):
+                    self.pet_owners.pop(e.attacker, None)
+                    self.pet_owners_dirty = True
                 self._touch_encounter(e.ts)
                 self.encounter["total_in"] += e.damage
                 self.encounter["in_hits"] = self.encounter.get("in_hits", 0) + 1
@@ -316,11 +413,11 @@ class CharacterTracker:
             elif isinstance(e, ev.Kill):
                 self.kills += 1
                 mob = _foe_key(e.target)
-                stats = self.mob_stats.setdefault(
-                    mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
-                stats["kills"] += 1
+                self._mob(mob)["kills"] += 1
                 self._last_kill = (mob, e.ts)
-                self._absorb_pending_xp(mob, e.ts)
+                self._absorb_pending_rewards(mob, e.ts)
+                if self.pet_owners.pop(e.target, None):  # charm pet died
+                    self.pet_owners_dirty = True
                 if self.encounter and (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS:
                     self.encounter["last"] = e.ts
                     self._encounter_foe(e.target, slain=True)
@@ -332,11 +429,11 @@ class CharacterTracker:
                 mob = _foe_key(e.victim)
                 if killer.lower() == (self.name or "").lower():
                     self.kills += 1
-                    stats = self.mob_stats.setdefault(
-                        mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
-                    stats["kills"] += 1
+                    self._mob(mob)["kills"] += 1
                 self._last_kill = (mob, e.ts)
-                self._absorb_pending_xp(mob, e.ts)
+                self._absorb_pending_rewards(mob, e.ts)
+                if self.pet_owners.pop(e.victim, None):  # mapped pet slain
+                    self.pet_owners_dirty = True
                 if (self.encounter and
                         (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS
                         and mob in self.encounter.get("foes", {})):
@@ -356,26 +453,45 @@ class CharacterTracker:
                     self._pending_xp = (e.ts, e.percent)
             elif isinstance(e, ev.AAPoint):
                 self.aa_points += 1
-                if self.aa_available is not None:
+                if e.total is not None:
+                    self.aa_available = e.total  # the log's own running total
+                elif self.aa_available is not None:
                     self.aa_available += 1
             elif isinstance(e, ev.SkillUp):
                 self.skill_ups += 1
             elif isinstance(e, ev.Loot):
                 label = f"{e.item} → {e.upgraded_to}" if e.upgraded_to else e.item
+                if e.count > 1:
+                    label = f"{e.count}× {label}"
                 if e.sold:
                     label += " (sold)"
+                elif e.stored:
+                    label += " (banked)"
                 self.loots.appendleft(label)
                 # loot lines name the corpse: exact per-mob attribution
                 if e.source and "'s corpse" in e.source:
                     mob = _foe_key(e.source.split("'s corpse")[0].strip())
-                    stats = self.mob_stats.setdefault(
-                        mob, {"kills": 0, "xp_percent": 0.0, "loots": []})
+                    stats = self._mob(mob)
+                    stats["loot_drops"] += max(e.count, 1)
                     if e.item not in stats["loots"] and len(stats["loots"]) < 8:
                         stats["loots"].append(e.item)
+            elif isinstance(e, ev.Coin):
+                copper = _coin_copper(e.amount)
+                if copper and not e.vendor and not e.from_item:
+                    # corpse coin prints just BEFORE its kill line — hold
+                    # it for forward attribution exactly like XP
+                    self._pending_coin = (e.ts, copper)
+            elif isinstance(e, ev.Resist) and e.direction == "out":
+                enc = self.encounter
+                if (enc is not None and
+                        (e.ts - enc["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS):
+                    rs = enc.setdefault("resists", {})
+                    rkey = e.spell or "spell"
+                    rs[rkey] = rs.get(rkey, 0) + 1
 
         self._dirty = True
         if e.type not in ("other_out", "aa_list", "aa_meta", "who_other",
-                          "pet_inv_header", "pet_gear"):
+                          "pet_inv_header", "pet_gear", "pet_attack"):
             # other_out is too spammy; aa listing bursts are metadata
             self.ledger.append({**e.model_dump(mode="json"), "live": live})
 
@@ -404,6 +520,7 @@ class CharacterTracker:
                 "name": name,
                 "kind": ab["kind"],
                 "hits": ab["hits"],
+                "crits": ab.get("crits", 0),
                 "total": ab["total"],
                 "avg": round(ab["total"] / ab["hits"], 1),
                 "dps": round(ab["total"] / duration, 1),
@@ -461,6 +578,7 @@ class CharacterTracker:
             "damage_taken": enc["total_in"],
             "in_hits": enc.get("in_hits", 0),
             "defense": dict(enc.get("defense") or {}),
+            "resists": dict(enc.get("resists") or {}),
             "dps": round(enc["total_out"] / duration, 1),
             "abilities": abilities,
         }
@@ -493,11 +611,14 @@ class CharacterTracker:
         merged: dict[str, dict] = {}
         for e in encs:
             for name, ab in e["abilities"].items():
-                m = merged.setdefault(name, {"kind": ab["kind"], "hits": 0, "total": 0})
+                m = merged.setdefault(name, {"kind": ab["kind"], "hits": 0,
+                                             "total": 0, "crits": 0})
                 m["hits"] += ab["hits"]
                 m["total"] += ab["total"]
+                m["crits"] += ab.get("crits", 0)
         abilities = [
-            {"name": n, "kind": m["kind"], "hits": m["hits"], "total": m["total"],
+            {"name": n, "kind": m["kind"], "hits": m["hits"],
+             "crits": m["crits"], "total": m["total"],
              "avg": round(m["total"] / m["hits"], 1),
              "dps": round(m["total"] / total_dur, 1)}
             for n, m in merged.items()
@@ -680,6 +801,7 @@ class CharacterTracker:
                 "xp_percent": round(self.xp_percent, 3),
                 "aa_points": self.aa_points,
                 "skill_ups": self.skill_ups,
+                "crits": self.crits,
                 "hit_rate": round(
                     100 * self.swings_hit / max(self.swings_hit + self.swings_missed, 1), 1),
                 "loots": list(self.loots),

@@ -17,13 +17,15 @@ function classify(r: LedgerRow): {
     case "zone":
       return { kind: "milestone", text: `Entered ${r.zone}`, divider: true };
     case "melee_out":
-      return { kind: "out", text: `You ${r.verb} ${r.target}`, value: `${r.damage}` };
+      return { kind: "out", text: `You ${r.verb} ${r.target}`, value: `${r.damage}${r.crit ? " ✦" : ""}` };
     case "spell_out":
-      return { kind: "out", text: `${r.spell} → ${r.target}`, value: `${r.damage}` };
+      return { kind: "out", text: `${r.spell} → ${r.target}`, value: `${r.damage}${r.crit ? " ✦" : ""}` };
     case "melee_in":
-      return { kind: "in", text: `${r.attacker} ${r.verb}s YOU`, value: `−${r.damage}` };
+      return { kind: "in", text: `${r.attacker} ${r.verb}s YOU`, value: `−${r.damage}${r.crit ? " ✦" : ""}` };
     case "spell_in":
-      return { kind: "in", text: `${r.spell} from ${r.attacker}`, value: `−${r.damage}` };
+      return { kind: "in", text: `${r.spell} from ${r.attacker}`, value: `−${r.damage}${r.crit ? " ✦" : ""}` };
+    case "ds_out":
+      return { kind: "out", text: `Damage shield sears ${r.target}`, value: `${r.damage}` };
     case "non_melee":
       return { kind: "dim", text: `${r.target} hit by non-melee`, value: `${r.damage}` };
     case "heal_in":
@@ -43,13 +45,38 @@ function classify(r: LedgerRow): {
     case "other_death":
       return { kind: "dim", text: `${r.victim} slain by ${r.killer}` };
     case "dot_out":
-      return { kind: "out", text: `${r.spell} gnaws ${r.target}`, value: `${r.damage}` };
+      return { kind: "out", text: `${r.spell} gnaws ${r.target}`, value: `${r.damage}${r.crit ? " ✦" : ""}` };
     case "miss_out":
       return { kind: "dim", text: `You miss ${r.target}` };
     case "miss_in":
       return { kind: "dim", text: `${r.attacker} misses you` };
     case "coin":
-      return { kind: "milestone", text: `+${r.amount}` };
+      return {
+        kind: "milestone",
+        text: r.vendor
+          ? `Sold ${r.item} to ${r.vendor} — +${r.amount}`
+          : r.split
+            ? `Split share +${r.amount}`
+            : `+${r.amount}`,
+      };
+    case "resist":
+      return {
+        kind: "cast",
+        text:
+          r.direction === "in"
+            ? `You resist ${r.spell}`
+            : `${r.target ?? "Target"} resisted ${r.spell}`,
+      };
+    case "faction":
+      return {
+        kind: "dim",
+        text: `Faction: ${r.faction}`,
+        value: `${Number(r.delta) > 0 ? "+" : ""}${r.delta}`,
+      };
+    case "merge":
+      return { kind: "milestone", text: `Merged → ${r.item}` };
+    case "destroyed":
+      return { kind: "dim", text: `Destroyed ${Number(r.count) > 1 ? `${r.count}× ` : ""}${r.item}` };
     case "exp":
       return {
         kind: "milestone",

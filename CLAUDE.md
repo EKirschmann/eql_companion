@@ -58,6 +58,7 @@ backend/
 ├── wiki_http.py         # no-Node wiki fallback (MediaWiki api.php -> text)
 ├── mcp_client.py        # stdio client for the EQL MCP server (+ HTTP fallbacks)
 ├── builds_data.py       # direct reader of the eqlbuilds snapshot (levels, ids)
+├── spell_file.py        # client spells_us.txt reader (proc + lifetap sets)
 ├── spellsets.py         # read/WRITE the game's LO*.ini saved spell sets
 ├── game_data.py         # wiki/builds grounding, verification helpers, ZEM table
 ├── spellbook.py         # /outputfile export parsing (spellbook/inventory/...)
@@ -80,31 +81,53 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
 
 ## Log pipeline (the spine of everything)
 
-- **watcher.py**: polling tailer (0.4s), binary reads with byte offsets.
+- **watcher.py**: polling tailer (0.4s), binary reads with byte offsets,
+  cp1252 decode (EQ logs are NOT utf-8), truncation guard (size < offset
+  resets to 0), `last_growth` staleness stamp surfaced via `/health`.
   On startup it either restores the previous session (below) or replays the
   last 1MB as *uncounted* seed events to establish zone/level/ledger.
 - **parser.py**: every regex lives in one table at the top. Verified against
-  real EQL logs — melee/miss both directions, EQL DoT ticks ("has taken X
-  damage from your Y"), exp percent lines, upgrade-loot, coin, casts, kills,
-  `/who` char_info (class abbreviations expand; the trio is authoritative),
-  `/loc`, AA list bursts, pet ownership ("My leader is X").
+  real EQL logs — melee/miss both directions (verbs incl. frenzy "on"/
+  cleave/smite/reave/shoot), EQL DoT ticks all THREE shapes ("from your X",
+  incoming "You have taken N from X by Y", casterless proc "has taken N
+  damage by X"), plain + incoming non-melee, damage shields (ours = ds_out
+  aux damage: totals yes, swings/crits no; others -> other_out), exp
+  percent lines, upgrade-loot (count/sold/merged/banked-to-depot forms),
+  coin (corpse/split/vendor-sale/from-that-item), casts (casting|singing),
+  named fizzles/interrupts + bard forms, resists both directions, faction,
+  item merges, destroys, kills, `/who` char_info, `/loc`, AA list bursts +
+  the "You now have N ability points" total (authoritative for unspent),
+  pet ownership. STACKED trailing tags "(Riposte) (Critical)" peel before
+  matching -> `crit` flag on damage events (session + per-ability counts).
+  A CHAT GUARD drops speech lines before combat matching (players quote
+  combat text); pet tells parse before it. PC-name patterns allow
+  backticks/apostrophes (Asaka L`Rei).
 - Other players' hits parse as `other_out` but are never broadcast — they
   only feed per-encounter group DPS. Own pets fold into the player
   ("Pet: <source>" rows, incl. pet DoTs via the "by <caster>" form);
-  others' pets fold into their owner's ally row. Pets need a "/pet leader"
-  mapping — casting a pet summon with none raises a Vitals hint.
+  others' pets fold into their owner's ally row. Pets AUTO-MAP with zero
+  user action: the pet's tell ("<pet> told you, 'Attacking X Master.'")
+  only ever prints in the OWNER's log ("/pet leader" still works and is
+  the hint fallback). A mapped "pet" that damages YOU un-maps instantly
+  (charm broke); a mapped pet slain (or killed by us as a mob) un-maps.
 - `/pet inventory check` logs a burst ("Your pet has the following items
   equipped:" or "does not have any items equipped") + slot lines, parsed
   into `tracker.pet_inventory`. A MAPPED pet (`/pet leader`) appears as its
   own "(pet)" row in the group-DPS breakdown ("You" there is player-only
   so the split never double-counts); its abilities show in the encounter
-  Pet section. Exaltation proc damage is labeled "(exaltation)" unless the
-  effect is also a scribed spell (a cast and a proc are indistinguishable).
-- XP attribution is FORWARD-ONLY: EQL prints "You gain experience!"
-  BEFORE its kill line, so XP holds as pending and is claimed by the next
-  kill (own, mapped pet, or ally "has been slain by X") within 3s.
-  Backward attribution mis-credited every tick during chain pulls.
-  Per-mob XP and the XP box reset on level-up.
+  Pet section. Exaltation proc damage is labeled "(exaltation)"; effects
+  that are ALSO scribed spells label only when the client spell file marks
+  them proc-granted AND no cast was seen this session (spell_file.py; log
+  evidence beats static data).
+- XP AND corpse-coin attribution are FORWARD-FIRST: EQL prints the reward
+  lines BEFORE their kill line, so both hold as pending and are claimed by
+  the next kill (own, mapped pet, or ally "has been slain by X") within
+  3s. A pending reward whose window EXPIRES unclaimed falls back to the
+  kill just before it (≤3s) — covers loot-the-corpse-later coin and
+  trailing party XP; naive backward attribution mis-credited every tick
+  during chain pulls, so forward claims always win. Per-mob stats carry
+  kills/xp/coin_copper/loot_drops (drop-rate groundwork). Per-mob XP and
+  the XP box reset on level-up.
 - Heals name their healer ("Bosh healed itself for 159 (210) hit points
   by Spirit Tap") — encounter heal rows key "Spell — Healer". Incoming
   avoidance parses per defense verb (block/dodge/parry/riposte/miss) into
@@ -112,8 +135,9 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
 - Exaltation procs share the spell-damage line shape; effects granted by
   owned stones (wiki-mined into tracker.exalt_effects at startup/export
   refresh/character switch) label ability rows "(exaltation)" — MINUS any
-  effect that is also a scribed spell (a cast and a proc are
-  indistinguishable; mislabeling real casts is the worse error).
+  effect that is also a scribed spell UNLESS spell_file.py marks it
+  proc-granted and the session never saw it cast (mislabeling real casts
+  is the worse error, so ambiguity still resolves toward no label).
 - **Adding an event type**: model in `events.py` → regex + branch in
   `parser.py` → (optional) count in `state_tracker.apply()` → (optional) add
   to `PERSISTED_EVENTS` in main.py → `case` in WarLedger `classify()`.
@@ -297,6 +321,15 @@ whenever the Inventory parse changes.
 - Chat (agent/graph.py) uses the same `get_llm()` seam.
 
 ## Wiki grounding
+
+`spell_file.py` reads the game's own `spells_us.txt` (caret-delimited, in
+`EQL_GAME_DIR`; format per Amerzel/eql-info, effects blob located by "1|"
+content scan): proc-granted spell names (SPA 85/323/339/360/361/365/383/
+419/427/429) drive exaltation-proc disambiguation, and lifetap target
+types (13/20) drive the synthesized self-heal — your OWN taps log no heal
+line at all. Loaded in a worker thread at startup (~0.4s); fail-soft
+empty sets without the file. Item-granted weapon procs are NOT in the
+spell file (known limit).
 
 `builds_data.py` reads the eqlbuilds.com dataset snapshot that ships inside
 the MCP clone (dist/data/eqlbuilds — CI-refreshed): per-class spell lists
