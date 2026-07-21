@@ -767,30 +767,6 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </tbody>
                 </table>
               )}
-              {gear && gear.exaltations.length > 0 && (
-                <>
-                  <div className="adv-sub" style={{ marginTop: 10 }}>
-                    Exaltations you own (can-socket-into is computed from the
-                    class/slot rules; the actual move is done in-game)
-                  </div>
-                  <ul className="adv-list">
-                    {gear.exaltations.map((x) => (
-                      <li key={x.name}>
-                        <strong>{x.name}</strong>
-                        {x.where && <span className="adv-cls"> — {x.where}</span>}
-                        <br />
-                        {x.why}
-                        {x.move_to && (
-                          <>
-                            <br />
-                            <span className="adv-cls">can socket into: {x.move_to}</span>
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
               {(() => {
                 const petInv = snap?.pet_inventory ?? {};
                 const petGear = gear?.pet_gear ?? [];
@@ -839,6 +815,30 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   </>
                 );
               })()}
+              {gear && gear.exaltations.length > 0 && (
+                <>
+                  <div className="adv-sub" style={{ marginTop: 10 }}>
+                    Exaltations you own (can-socket-into is computed from the
+                    class/slot rules; the actual move is done in-game)
+                  </div>
+                  <ul className="adv-list">
+                    {gear.exaltations.map((x) => (
+                      <li key={x.name}>
+                        <strong>{x.name}</strong>
+                        {x.where && <span className="adv-cls"> — {x.where}</span>}
+                        <br />
+                        {x.why}
+                        {x.move_to && (
+                          <>
+                            <br />
+                            <span className="adv-cls">can socket into: {x.move_to}</span>
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {gear && gear.farm.length > 0 && (
                 <>
                   <div className="adv-sub" style={{ marginTop: 10 }}>Where to farm upgrades</div>

@@ -235,9 +235,15 @@ whenever the Inventory parse changes.
   two generic **Any Slots** (any equippable item, stats live), paired
   Ear/Wrist/Fingers, Ammo, Held — **no Charm or Power Source in EQL**.
   Unaddressed slots backfill as keep/empty rows (`_full_slot_table`).
-- Wiki item stats are BASE (+0) values; +N upgrade ranks scale enormously
-  and are undocumented — items with a higher worn rank are never "beaten"
-  by base-stat comparisons, and STATS UNKNOWN items are never replaced.
+- Wiki item stats are BASE (+0) values, and the eqlwiki Item Level
+  slider's formula (ext.itemLevelSlider JS) is PORTED into game_data.py
+  (`scale_item_line`, mirroring its Excel rounding + float op order):
+  gear-context lines are pre-scaled to each item's owned +N — primary
+  stats +1/level at base<=10 else ~+10% of base/level, DMG
+  +floor(base*N/10), haste/regen +1/level, weight −9%/level, emergent
+  "SV VOID: +N" when 2+ qualifier stats — so the LLM compares REAL
+  numbers (a strong +0 can honestly beat a worn +2). Never re-scale an
+  already-scaled line. STATS UNKNOWN items are still never replaced.
 - Gear is usable if ANY ONE of the trio can use it (`[USABLE]` pre-tags;
   wiki Race: lines are stale classic-era data and are stripped).
 - A 2H primary recommendation deterministically drops the secondary rec.
@@ -281,7 +287,8 @@ whenever the Inventory parse changes.
   `_builtin_counsel` / `_builtin_gear`: effect-categorized loadout
   (damage/heal/control/buff via spell records), exact supersession warnings,
   horizon from scribed-ahead + purchasable, AA cost ranking, hunting picks,
-  gear rank-upgrade detection. Also the automatic fallback when any LLM
+  gear upgrades (same-item higher ranks + strict-Pareto swaps on scaled
+  stats). Also the automatic fallback when any LLM
   call FAILS — the tab never breaks.
 - LM Studio only: `_lmstudio_budget` sizes max_tokens to the loaded context
   window (prevents cryptic 400 overflows; thinking models burn reasoning

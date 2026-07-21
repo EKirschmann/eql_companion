@@ -586,12 +586,35 @@ def _item_rank(name: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _pareto_beats(a: dict, b: dict) -> bool:
+    """True when stat vector `a` is >= `b` on EVERY stat and > on at least
+    one (DELAY inverted — lower is better). Missing stats count as 0, so a
+    challenger lacking any stat the worn item has always fails."""
+    better = False
+    for k in set(a) | set(b):
+        av, bv = a.get(k, 0.0), b.get(k, 0.0)
+        if k == "DELAY":
+            av, bv = -av, -bv
+        if av < bv:
+            return False
+        if av > bv:
+            better = True
+    return better
+
+
 async def _builtin_gear(ctx: dict) -> dict:
-    """No-LLM gear counsel: rank-upgrade detection is exact (same base item
-    at a higher +N owned elsewhere); cross-item comparisons need a model."""
+    """No-LLM gear counsel: exact same-item rank upgrades, plus cross-item
+    swaps when a bag/bank item strictly Pareto-dominates the worn item's
+    stat vector with BOTH sides scaled to their owned +N (never worse,
+    better somewhere). Judgment-shaped trade-offs (weapon ratios, procs,
+    farm targets) still need a model."""
+    from backend.game_data import (item_line, item_stat_vector,
+                                   scale_item_line, _trio_usable)
     worn = ctx.get("worn") or {}
     items = ctx.get("inventory_items") or []
-    recs = []
+    classes = [x.strip() for x in (ctx.get("class_str") or "").split("/")
+               if x.strip()]
+    recs, used = [], set()
     for slot, cur in worn.items():
         cb, cr = _item_base(cur), _item_rank(cur)
         best = None
@@ -608,6 +631,54 @@ async def _builtin_gear(ctx: dict) -> dict:
                          "why": f"same item at higher rank "
                                 f"(+{_item_rank(best['name'])} vs +{cr})",
                          "where": best["where"]})
+            used.add(best["name"].lower())
+            continue
+        # cross-item Pareto swap — armor-style slots only (weapon value is
+        # ratio/proc-shaped, not strictly comparable stat by stat)
+        if re.sub(r"\s+\d+$", "", slot.lower()) in ("primary", "secondary",
+                                                    "range"):
+            continue
+        try:
+            cur_line = await item_line(cur)
+        except Exception:
+            cur_line = None
+        if not cur_line:
+            continue  # STATS UNKNOWN worn item is never replaced
+        cur_vec = item_stat_vector(scale_item_line(cur_line, cr))
+        if not cur_vec:
+            continue
+        champ = None
+        for it in items:
+            nm = it["name"]
+            if (it.get("where") == "worn" or nm.lower() in used
+                    or _item_base(nm) == cb):
+                continue
+            try:
+                line = await item_line(nm)
+            except Exception:
+                line = None
+            if not line or "Slot:" not in line:
+                continue
+            if not await _fits_slot(nm, slot):
+                continue
+            if classes and _trio_usable(line, classes) is False:
+                continue
+            vec = item_stat_vector(scale_item_line(line, _item_rank(nm)))
+            if not vec or not _pareto_beats(vec, cur_vec):
+                continue
+            gain = sum(vec.get(k, 0.0) - cur_vec.get(k, 0.0)
+                       for k in set(vec) | set(cur_vec) if k != "DELAY")
+            if champ is None or gain > champ[0]:
+                champ = (gain, it)
+        if champ:
+            it = champ[1]
+            recs.append({"slot": slot, "current": cur,
+                         "recommend": it["name"],
+                         "why": "strictly better at its owned +N — every "
+                                "listed stat equal or higher (wiki "
+                                "item-level scaling applied to both)",
+                         "where": it["where"]})
+            used.add(it["name"].lower())
     exalts = [{"name": x["name"], "move_to": "",
                "where": ("in " + x["host"] if x.get("host")
                          else f"loose in {x['where']}"),
@@ -616,9 +687,10 @@ async def _builtin_gear(ctx: dict) -> dict:
               for x in (ctx.get("exaltations") or [])]
     return {
         "source": "builtin",
-        "note": "Deterministic gear check — no LLM. Exact-upgrade detection "
-                "only (same item at a higher +N rank in bags or bank); "
-                "cross-item stat comparisons and farming targets need a "
+        "note": "Deterministic gear check — no LLM. Same-item higher-rank "
+                "upgrades plus strictly-better swaps, with stats compared "
+                "at each item's owned +N via the wiki's item-level "
+                "formula; weapon trade-offs and farming targets need a "
                 "model from the Counsel selector.",
         "slots": _full_slot_table(recs, worn),
         "farm": [], "exaltations": exalts, "unknown": [], "pet_gear": [],
@@ -901,7 +973,7 @@ async def generate_advice(ctx: dict) -> dict:
 
 GEAR_PROMPT = """You are the equipment advisor inside an EverQuest Legends companion app. EQL is a reimagined pre-Kunark EverQuest. A character runs THREE classes, and gear is equippable when ANY ONE of those classes can use it — one match is enough, it stays equipped across class swaps. Each item below is pre-marked [USABLE] or [NOT USABLE by this trio]; NEVER re-derive class eligibility yourself and NEVER reject a [USABLE] item because some of the trio cannot use it.
 Recommend a TWO-HANDER for Primary ONLY when it beats the current primary AND secondary COMBINED — the off-hand goes empty — and say that comparison in the why.
-CRITICAL — upgrade ranks: the stats listed are the BASE (+0) values. EQL's +N upgrade system boosts stats enormously (a +2 helm can have 3-4x the base AC and large HP/resists the base lacks). When a worn item has a higher +N than a challenger, assume its real stats are far above the listing. Items marked STATS UNKNOWN have no data at all — NEVER invent their stats and NEVER recommend replacing them (you cannot make an honest comparison).
+CRITICAL — upgrade ranks: each item's stats are ALREADY SCALED to the +N in its name, using the wiki's own item-level formula (primary stats gain ~10% of base per level, or +1/level when the base is <=10; DMG gains floor(base*N/10); items with 2+ stats gain an emergent "SV VOID: +N" resist). Compare the printed numbers DIRECTLY — a higher +N does NOT automatically win, and a strong +0 item can honestly beat a worn +2. Unowned drops you suggest in "farm" start at +0, so quote base values for those. Items marked STATS UNKNOWN have no data at all — NEVER invent their stats and NEVER recommend replacing them (you cannot make an honest comparison).
 
 Paired slots: "Ear 1"/"Ear 2", "Wrist 1"/"Wrist 2", "Fingers 1"/"Fingers 2", "Any Slot 1"/"Any Slot 2" hold TWO independent items each — treat each numbered slot separately and remember both currently-worn items of a pair are listed. The two "Any Slot"s are EQL's generic slots: ANY equippable item can sit there (weapons included) and its stats apply, so recommend the best owned items that don't fit elsewhere; also consider "Ammo" and "Held" if something owned is worth parking there.
 
@@ -956,7 +1028,7 @@ async def _exalt_effect(base_item: str) -> Optional[str]:
     line = await item_line(base_item)
     if not line:
         return None
-    m = re.search(r"Effect: [^;|]+", line)
+    m = re.search(r"(?:Focus )?Effect: [^;|]+", line)
     return m.group(0) if m else "no listed effect (stat stone?)"
 
 
@@ -1095,7 +1167,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
         try:
             full_line = await _gd_item_line(bname)
             if full_line:
-                m2 = re.search(r"Effect: [^;|]+", full_line)
+                m2 = re.search(r"(?:Focus )?Effect: [^;|]+", full_line)
                 eff = m2.group(0) if m2 else "no listed effect (stat stone?)"
                 usable = _trio_usable(full_line, classes)
         except Exception:
@@ -1128,7 +1200,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
                            + f" — type: {styp} (fits {fits}){lvl_tag}{cls_tag}")
         # deterministic, informational (NOT a move prescription — socketing
         # compatibility rules are not reliably derivable from our data)
-        eff_txt = re.sub(r"^Effect:\s*", "", eff or "").strip() if eff else ""
+        eff_txt = re.sub(r"^(?:Focus )?Effect:\s*", "", eff or "").strip() if eff else ""
         if usable is False:
             status = "not usable by your classes"
         elif lm and ctx.get("level") is not None and ctx["level"] < int(lm.group(1)):
@@ -1215,9 +1287,29 @@ async def generate_gear_advice(ctx: dict) -> dict:
                 continue  # pets accept Attunable items only, not No-Drop
             pool.append(nm)
         pool_txt = "; ".join(sorted(set(pool))[:40]) or "none"
-        cur = ("The pet CURRENTLY holds: "
-               + (", ".join(sorted(pet_inv.values())) if pet_inv else "nothing")
-               + ". ")
+        if pet_inv:
+            # held items live on the PET, not in the inventory export - mine
+            # their stat lines here (scaled to each +N) or the model would
+            # compare candidates against bare names
+            from backend.game_data import (item_rank as _irk,
+                                           scale_item_line as _scl)
+            held = []
+            for nm in sorted(pet_inv.values()):
+                try:
+                    hl = await _il(nm)
+                except Exception:
+                    hl = None
+                held.append("  - " + nm + " - "
+                            + (_scl(hl, _irk(nm)) if hl else
+                               "STATS UNKNOWN (never displace this item)"))
+            free = max(0, pet_slots - len(pet_inv))
+            cur = ("The pet CURRENTLY holds (stats shown at each item's "
+                   "+N):\n" + "\n".join(held) + "\nFree pet slots: "
+                   f"{free}. Recommend a hand-over ONLY when it clearly "
+                   "BEATS one of the held items above (name the item it "
+                   "replaces in the why) or fills a free slot. ")
+        else:
+            cur = "The pet CURRENTLY holds: nothing. "
         pet_block = (
             f"PET LOADOUT — the pet's base classes are {pet_class_str}, and "
             "it can ALSO wear the player's classes' gear (up to five classes "
@@ -1349,7 +1441,24 @@ async def generate_gear_advice(ctx: dict) -> dict:
     for it in items:
         owned_locs.setdefault(it["name"].lower(), it.get("where"))
     pet_worn = {v.lower() for v in (ctx.get("pet_inventory") or {}).values()}
-    from backend.game_data import _trio_usable as _tu, item_line as _il2
+    from backend.game_data import (_trio_usable as _tu, item_line as _il2,
+                                   item_rank as _ir2,
+                                   item_stat_vector as _vec2,
+                                   scale_item_line as _scl2)
+    # a FULL pet means every hand-over displaces something - precompute the
+    # held items' scaled stat vectors so strictly-worse recs never show
+    pet_full = pet_slots > 0 and len(pet_worn) >= pet_slots
+    held_vecs = []
+    if pet_full:
+        for hnm in (ctx.get("pet_inventory") or {}).values():
+            try:
+                hline = await _il2(hnm)
+            except Exception:
+                hline = None
+            if hline:
+                hv = _vec2(_scl2(hline, _ir2(hnm)))
+                if hv:
+                    held_vecs.append((hnm, hv))
     for ph in _clean_list(data.get("pet_gear"), ("item", "slot", "why"),
                           cap=max(0, int(pet_slots)),
                           require="item"):
@@ -1361,12 +1470,21 @@ async def generate_gear_advice(ctx: dict) -> dict:
             logger.info("Dropped pet-gear rec (not spare): %s (%s)", ph["item"], where)
             continue
         try:
-            usable = _tu(await _il2(ph["item"]), pet_classes)
+            rline = await _il2(ph["item"])
+            usable = _tu(rline, pet_classes)
         except Exception:
-            usable = None
+            rline, usable = None, None
         if usable is False:
             logger.info("Dropped pet-gear rec — pet class can't use: %s", ph["item"])
             continue
+        if held_vecs and rline:
+            rvec = _vec2(_scl2(rline, _ir2(ph["item"])))
+            dominated_by = next((hnm for hnm, hv in held_vecs
+                                 if rvec and _pareto_beats(hv, rvec)), None)
+            if dominated_by:
+                logger.info("Dropped pet-gear rec - %s is strictly worse "
+                            "than held %s", ph["item"], dominated_by)
+                continue
         ph["where"] = where
         pet_gear.append(ph)
     table = _full_slot_table(slots, ctx.get("worn"))

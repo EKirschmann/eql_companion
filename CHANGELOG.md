@@ -4,6 +4,46 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.8.0 — 2026-07-21
+
+- **Gear advice now uses REAL +N stats.** The wiki's Item Level slider
+  formula (eqlwiki computes upgraded stats client-side from the base
+  item) is ported into the app and verified to match the site
+  bit-for-bit: primary stats gain ~10% of base per level (+1/level for
+  small values), weapon damage gains floor(base×N/10), haste/regen +1
+  per level, weight drops, and items with 2+ stats grow the emergent
+  "SV VOID: +N" resist. Every owned item in the gear consult is shown
+  at its actual owned rank ("[stats at +4]"), so comparisons are
+  honest both ways — a higher +N no longer auto-wins, and a strong +0
+  drop can rightfully beat a worn +2.
+- Deterministic mode (LLM "none", and the fallback when a model call
+  fails) got real cross-item recommendations: besides same-item
+  higher-rank detection it now suggests a bags/bank item when it is
+  strictly better than the worn one — equal or higher on every scaled
+  stat, higher on at least one — slot- and class-checked.
+- **Pet hand-overs are verified before display.** The consult now
+  shows the model the pet's currently-held items WITH their scaled
+  stats (they aren't in your inventory export, so they were previously
+  compared as bare names), asks it to name what each hand-over
+  replaces, and a new deterministic gate drops any suggestion that is
+  strictly worse than something the pet already holds — no more
+  "replace the 19 AC breastplate with a 17 AC coat".
+- Exaltations: stones whose base item carries a **Focus Effect**
+  (a separate wiki field that our parser missed — it even renders
+  glued onto the Race line) now show that effect and type as focus
+  stones with correct "can socket into" rules, instead of
+  "no listed effect (stat stone?)".
+- Gear tab layout: Pet gear now sits directly under the player slot
+  table, with Exaltations after it.
+- Pet mechanics corrected per the definitive spec (since v1.7.0):
+  pet gear is a flat bag of N generic slots — no invented Head/Arms
+  rows; every pet is base Warrior plus a secondary class by pet type
+  (set via the new "pet 2nd class" dropdown); it can equip gear usable
+  by its two classes or any of your trio (Attunable only, never
+  No-Drop); the slot count auto-computes from your class combo and
+  stays overridable; gear persists through death and re-summon.
+- Quieter logs: wiki pages that don't exist (the HTTP fallback covers
+  them) no longer warn on every consult.
 ## v1.7.0 — 2026-07-19
 
 - Fixed the launcher serving a stale (older-version) interface in

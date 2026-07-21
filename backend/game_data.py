@@ -16,6 +16,7 @@ Wiki text shapes this parser expects (verified 2026-07-06):
   sections, each a table of 4-line records: Name / Ranks / Cost / Description.
 """
 import logging
+import math
 import re
 from typing import List, Optional
 
@@ -403,7 +404,8 @@ async def build_wiki_context(classes: List[str], level: Optional[int],
 
 # ------------------------------------------------------------------- gear
 
-ITEM_STAT_PREFIXES = ("Slot:", "AC:", "DMG:", "Skill:", "Effect:", "Haste:")
+ITEM_STAT_PREFIXES = ("Slot:", "AC:", "DMG:", "Skill:", "Effect:",
+                      "Focus Effect:", "Haste:")
 ITEM_STAT_TOKENS = ("STR:", "STA:", "AGI:", "DEX:", "WIS:", "INT:", "CHA:",
                     "HP:", "MANA:", "SV ", "Atk Delay:")
 
@@ -413,13 +415,157 @@ def _strip_upgrade(name: str) -> str:
     return re.sub(r"\s*\+\d+$", "", name.strip())
 
 
+# ------------------------------------------------ item-level (+N) scaling
+# Port of eqlwiki's ext.itemLevelSlider (the site's Item Level slider; JS
+# fetched 2026-07-21): +N stats are computed CLIENT-SIDE from the base
+# stats — the wiki stores nothing per-level. This mirrors the JS exactly
+# (Excel-style rounding, float op order) so our numbers match the site.
+# In-game "+N" = the slider's full levels (its fractional steps are
+# partial combine progress and never appear in item names).
+
+_ILS_PRIMARY = {"AC", "HP", "MP", "END", "STR", "STA", "AGI", "DEX", "WIS",
+                "INT", "CHA", "SV_MAGIC", "SV_FIRE", "SV_COLD", "SV_POISON",
+                "SV_DISEASE"}
+_ILS_VOID_QUALS = {"STR", "STA", "INT", "AGI", "DEX", "CHA", "WIS",
+                   "SV_FIRE", "SV_COLD", "SV_POISON", "SV_MAGIC",
+                   "SV_DISEASE"}
+_ILS_ALIASES = {"DAMAGE": "DMG", "MANA": "MP", "ENDUR": "END",
+                "SV MAGIC": "SV_MAGIC", "SV FIRE": "SV_FIRE",
+                "SV COLD": "SV_COLD", "SV POISON": "SV_POISON",
+                "SV DISEASE": "SV_DISEASE", "MAGIC": "SV_MAGIC",
+                "FIRE": "SV_FIRE", "COLD": "SV_COLD", "POISON": "SV_POISON",
+                "DISEASE": "SV_DISEASE", "HP REGEN": "HP_REGEN",
+                "WEIGHT": "WT"}
+_ILS_SCALABLE = ("HP REGEN", "SV DISEASE", "SV POISON", "SV MAGIC",
+                 "SV COLD", "SV FIRE", "DAMAGE", "DMG", "AC", "HP", "MP",
+                 "MANA", "ENDUR", "END", "STR", "STA", "AGI", "DEX", "WIS",
+                 "INT", "CHA", "MAGIC", "FIRE", "COLD", "POISON", "DISEASE",
+                 "HASTE", "WEIGHT", "WT")
+_ILS_STAT_RE = re.compile(
+    r"(\b(?:" + "|".join(re.escape(s) for s in
+                         sorted(_ILS_SCALABLE, key=len, reverse=True))
+    + r")\b)(:\s*)([+\-]?)(\d+(?:\.\d+)?)(\s*%?)")
+
+
+def item_rank(name: str) -> int:
+    """'Raw-Hide Cloak +4' -> 4; unranked -> 0."""
+    m = re.search(r"[+](\d+)\s*$", name or "")
+    return int(m.group(1)) if m else 0
+
+
+def _ils_round(value: float, digits: int = 0) -> float:
+    """Excel ROUND (half away from zero) — mirrors the JS excelRound."""
+    factor = 10.0 ** digits
+    scaled = value * factor
+    if value >= 0:
+        return math.floor(scaled + 0.5) / factor
+    return math.ceil(scaled - 0.5) / factor
+
+
+def _ils_round_up(value: float, digits: int = 0) -> float:
+    """Excel ROUNDUP (away from zero) — mirrors the JS excelRoundUp."""
+    factor = 10.0 ** digits
+    scaled = value * factor
+    if value >= 0:
+        return math.ceil(scaled) / factor
+    return math.floor(scaled) / factor
+
+
+def _ils_scale(key: str, base: float, n: int) -> float:
+    """One stat's value at item level n. Primary stats: +1/level while the
+    base is <=10, else ~+10% of base per level (penalties shrink toward 0);
+    DMG: +floor(base*n/10); regen/haste: +1/level; weight shrinks ~9% per
+    level on the slider's log curve."""
+    if key in _ILS_PRIMARY:
+        if base == 0:
+            return 0
+        if 0 < base <= 10:
+            return base + n
+        if base > 10:
+            return math.floor(base + _ils_round(base * n / 10.0, 0))
+        return min(0, base + n)
+    if key == "DMG":
+        return base if base <= 0 else base + math.floor(base * n / 10.0)
+    if key in ("HP_REGEN", "HASTE"):
+        return base + n if base > 0 else base
+    if key == "WT":
+        if n <= 0 or base <= 0.1:
+            return base
+        total = 2.0 ** n
+        raw = base * (1 + (-0.09 * (math.log(total) / math.log(2.0))))
+        return max(0.0, _ils_round_up(raw, 1))
+    return base
+
+
+def scale_item_line(line: str, rank: int) -> str:
+    """Rewrite a compact BASE-stat item line to its values at +rank, per
+    the wiki slider's formula; appends the emergent "SV VOID: +N" line
+    when the item carries 2+ qualifier stats. Apply only to base (+0)
+    lines — scaling an already-scaled line compounds. rank<=0 = as-is."""
+    if not line or rank <= 0:
+        return line
+    quals = set()
+
+    def _sub(m):
+        name, colon, sign, num, pct = m.groups()
+        key = _ILS_ALIASES.get(name.upper(), name.upper().replace(" ", "_"))
+        base = float(num) * (-1.0 if sign == "-" else 1.0)
+        if key in _ILS_VOID_QUALS:
+            quals.add(key)
+        val = _ils_scale(key, base, rank)
+        if key == "WT":
+            txt = f"{val:.1f}"
+        elif abs(val - round(val)) < 1e-7:
+            txt = str(int(round(val)))
+        else:
+            txt = f"{val:.3f}".rstrip("0").rstrip(".")
+        if val > 0 and sign == "+":
+            txt = "+" + txt
+        return f"{name}{colon}{txt}{pct}"
+
+    out = _ILS_STAT_RE.sub(_sub, line)
+    if len(quals) >= 2:
+        out += f"; SV VOID: +{rank}"
+    return out
+
+
+def item_stat_vector(line: str) -> dict:
+    """Canonical stat -> value parsed from a (scaled) compact line, for
+    deterministic comparisons. Includes DELAY (lower is better) and the
+    synthesized SV_VOID; skips WT (not a power stat). {} = no stats."""
+    out: dict = {}
+    for m in _ILS_STAT_RE.finditer(line or ""):
+        name, _, sign, num, _ = m.groups()
+        key = _ILS_ALIASES.get(name.upper(), name.upper().replace(" ", "_"))
+        if key == "WT":
+            continue
+        out.setdefault(key, float(num) * (-1.0 if sign == "-" else 1.0))
+    m = re.search(r"Atk Delay:\s*(\d+(?:\.\d+)?)", line or "")
+    if m:
+        out["DELAY"] = float(m.group(1))
+    m = re.search(r"SV VOID:\s*[+]?(\d+)", line or "")
+    if m:
+        out["SV_VOID"] = float(m.group(1))
+    return out
+
+
 def _compact_item(text: str) -> Optional[str]:
     """One advisor-ready line from an item wiki page, or None when the page
     is not an equippable item (no Slot/DMG lines)."""
     head, _, tail = text.partition("Drops From")
     stats = []
+    raw = []
     for line in head.splitlines():
         s = line.strip()
+        # the wiki's focus_effect template param renders glued onto the
+        # LAST stats line ("Race: ALLFocus Effect: X") — split it off so
+        # the Race skip below can't swallow it
+        i = s.find("Focus Effect:")
+        if i > 0:
+            raw.extend((s[:i].strip(), s[i:].strip()))
+        else:
+            raw.append(s)
+    for s in raw:
         if not s:
             continue
         if s.startswith("Race:"):
@@ -500,8 +646,10 @@ async def build_gear_context(items: list, classes: Optional[list] = None,
     for it in items:
         base = _strip_upgrade(it["name"])
         entry = seen.setdefault(base.lower(), {"name": it["name"],
-                                               "where": set()})
+                                               "where": set(),
+                                               "ranks": set()})
         entry["where"].add(it["where"])
+        entry["ranks"].add(item_rank(it["name"]))
         if it["where"] == "worn":
             entry["name"] = it["name"]  # prefer the worn (+N) display name
     lines, unknown = [], []
@@ -509,6 +657,15 @@ async def build_gear_context(items: list, classes: Optional[list] = None,
         line = await item_line(entry["name"])
         if line:
             where = "/".join(sorted(entry["where"]))
+            rank = item_rank(entry["name"])
+            line = scale_item_line(line, rank)  # stats AT the owned +N
+            note = ""
+            others = sorted(entry["ranks"] - {rank})
+            if others:
+                note = (f" [stats at +{rank}; other copies owned at "
+                        + ", ".join(f"+{r}" for r in others) + "]")
+            elif rank > 0:
+                note = f" [stats at +{rank}]"
             tag = ""
             if classes:
                 usable = _trio_usable(line, classes)
@@ -516,7 +673,7 @@ async def build_gear_context(items: list, classes: Optional[list] = None,
                     tag = " [USABLE]"
                 elif usable is False:
                     tag = " [NOT USABLE by this trio]"
-            lines.append(f"{entry['name']} [{where}]{tag} — {line}")
+            lines.append(f"{entry['name']} [{where}]{tag}{note} — {line}")
         else:
             unknown.append(entry["name"])
             where = "/".join(sorted(entry["where"]))
