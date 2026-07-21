@@ -4,6 +4,48 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.10.0 — 2026-07-21
+
+The knowledge release: the advisor now consults curated class guides,
+item names grew where-to-get-it hover cards, and duplicate gear
+surfaces merge opportunities.
+
+- **Class guides** (`class_guides/*.md`, editable): every consult now
+  reads curated guide files for your trio — a cross-class mechanics &
+  meta file (combat-roll math, the two-highest-classes HP rule, healer/
+  slower requirements, mote strategy), reference files for races,
+  stances & invocations (including how invocation bonuses scale with
+  your trio composition), and rituals, plus one file per class: deep
+  community-sourced guides for Enchanter (Cavepig) and Necromancer
+  (Haitsmelol/Necrotalk) and wiki-baseline files for the other 14.
+  Update them freely after patches — see class_guides/README.md.
+- **Item hover cards**: hover any item name in the Gear tab (slots,
+  farm targets, merges, pet hand-overs) to see where it comes from —
+  Drops From (zone + mob), Sold by, quests, and crafting, mined from
+  the wiki's rendered item pages.
+- **Merge opportunities**: owning two copies of the same equipment
+  (bags/bank/worn) now lists them under the slot table with the
+  predicted merge result from the wiki's progression model — equal
+  ranks merge to exactly one rank up; a +0 into a +6 shows the tiny
+  fractional gain honestly. Copies hosting exaltation stones are
+  flagged first.
+- **Honest survivability framing**: set your Max HP/Mana in the Vitals
+  panel (the log never prints them) and gear advice frames HP swaps as
+  percentages; with recent combat observed, it can say "+75 HP ≈ 2
+  average incoming hits". Magnitude adjectives without data are now
+  banned from gear counsel.
+- **Log accuracy** (from the July patch notes, verified against real
+  logs): heal crits are now parsed and counted (they only started
+  logging on 7/7), and tier-suffixed spell names ("Lay on Hands VI")
+  match correctly everywhere — proc labeling, lifetap detection, cast
+  evidence.
+- **Hunting keeps up with patches**: dev-revamped zones override the
+  community sheet's stale bands — Crushbone now advertises 4-22 and
+  Splitpaw 25-42, each tagged with the patch note.
+- Reliability: item names that miss the wiki fuzzy-resolve via search
+  + edit distance; wiki caches serve the last good data when a refresh
+  fails; the OCR position feed gains a contrast boost for small text
+  (thanks to DavisChappins/eql-tooltip for the techniques).
 ## v1.9.1 — 2026-07-21
 
 The panels catch up with everything v1.9.0 started tracking:

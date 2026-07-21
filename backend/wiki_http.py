@@ -88,6 +88,24 @@ async def fetch_page_text(title: str, max_characters: int = 40_000):
         return None
 
 
+async def fetch_page_html(title: str):
+    """Raw rendered HTML of a page (None if missing). The acquisition
+    sections (Drops From / Sold by / quests / crafting) exist ONLY in
+    rendered HTML — the {{Itempage}} template emits them, so raw wikitext
+    lacks them entirely (insight from DavisChappins/eql-tooltip, MIT)."""
+    def work():
+        d = _get({"action": "parse", "page": title, "format": "json",
+                  "prop": "text", "redirects": 1})
+        if "parse" not in d:
+            return None
+        return d["parse"]["text"]["*"]
+    try:
+        return await asyncio.to_thread(work)
+    except Exception as e:
+        logger.warning("HTTP wiki html %r failed: %s", title, e)
+        return None
+
+
 async def search_pages(query: str, limit: int = 10) -> list:
     def work():
         d = _get({"action": "query", "list": "search", "srsearch": query,

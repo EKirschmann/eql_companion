@@ -11,7 +11,7 @@ from typing import Optional
 
 from backend import spell_file
 from backend.log_system import events as ev
-from backend.log_system.parser import CLASS_ABBREV
+from backend.log_system.parser import CLASS_ABBREV, strip_tier
 
 DPS_WINDOW_SECONDS = 60
 COMBAT_TIMEOUT_SECONDS = 8
@@ -63,6 +63,8 @@ class CharacterTracker:
         self.spell_slots: Optional[int] = None   # spell slots unlocked via AAs (user-set)
         self.pet_slots: Optional[int] = None     # pet equipment slots (user-set)
         self.pet_classes: Optional[str] = None   # pet's equip class(es), user-set
+        self.max_hp: Optional[int] = None        # user-reported (log has no max HP)
+        self.max_mana: Optional[int] = None      # user-reported
         self.zone: Optional[str] = None
         # Session counters (live events only)
         self.damage_dealt = 0
@@ -187,22 +189,28 @@ class CharacterTracker:
         the client spell file marks them proc-granted AND this session
         never saw a cast (log evidence beats static data)."""
         low = (spell or "").lower()
-        if low in self.exalt_effects:
+        base = strip_tier(low)
+        if low in self.exalt_effects or base in self.exalt_effects:
             return f"{spell} (exaltation)"
-        if (low in self.exalt_ambiguous and low not in self.spell_casts
+        if ((low in self.exalt_ambiguous or base in self.exalt_ambiguous)
+                and low not in self.spell_casts
+                and base not in self.spell_casts
                 and spell_file.is_proc(low)):
             return f"{spell} (exaltation)"
         return spell
 
-    def _encounter_heal(self, ts: datetime, label: str, amount: int) -> None:
+    def _encounter_heal(self, ts: datetime, label: str, amount: int,
+                        crit: bool = False) -> None:
         enc = self.encounter
         if (enc is None or
                 (ts - enc["last"]).total_seconds() > COMBAT_TIMEOUT_SECONDS):
             return
         hl = enc.setdefault("heals", {}).setdefault(
-            label, {"hits": 0, "total": 0})
+            label, {"hits": 0, "total": 0, "crits": 0})
         hl["hits"] += 1
         hl["total"] += amount
+        if crit:
+            hl["crits"] = hl.get("crits", 0) + 1
 
     def _encounter_ability(self, ts: datetime, name: str, kind: str, damage: int,
                            target: Optional[str] = None,
@@ -282,6 +290,7 @@ class CharacterTracker:
         elif isinstance(e, ev.CastBegin):
             if e.spell:  # log evidence for proc-vs-cast disambiguation
                 self.spell_casts.add(e.spell.lower())
+                self.spell_casts.add(strip_tier(e.spell).lower())
         elif isinstance(e, ev.AAListEntry):
             # ownership data, not session data: applies in seed replay too.
             # Skip listings OLDER than what we already hold (e.g. the seed
@@ -405,12 +414,16 @@ class CharacterTracker:
                 self.healing_received += e.amount
             elif isinstance(e, ev.HealOut):
                 self.healing_done += e.amount
-                self._encounter_heal(e.ts, f"{e.spell} — You", e.amount)
+                if e.crit:
+                    self.crits += 1
+                self._encounter_heal(e.ts, f"{e.spell} — You", e.amount,
+                                     crit=e.crit)
             elif isinstance(e, ev.OtherHeal):
                 if e.target.lower() == (self.name or "").lower():
                     self.healing_received += e.amount
                 healer = self.pet_owners.get(e.healer, e.healer)
-                self._encounter_heal(e.ts, f"{e.spell} — {healer}", e.amount)
+                self._encounter_heal(e.ts, f"{e.spell} — {healer}", e.amount,
+                                     crit=e.crit)
             elif isinstance(e, ev.Kill):
                 self.kills += 1
                 mob = _foe_key(e.target)
@@ -537,7 +550,8 @@ class CharacterTracker:
         ]
         foes.sort(key=lambda f: (f["slain"], -f["damage"]))
         heals = [
-            {"name": name, "kind": "heal", "hits": hl["hits"], "total": hl["total"],
+            {"name": name, "kind": "heal", "hits": hl["hits"],
+             "crits": hl.get("crits", 0), "total": hl["total"],
              "avg": round(hl["total"] / hl["hits"], 1),
              "dps": round(hl["total"] / duration, 1)}
             for name, hl in enc.get("heals", {}).items()
@@ -641,6 +655,22 @@ class CharacterTracker:
         heals.sort(key=lambda a: (a["avg"], a["total"]), reverse=True)
         return {"encounters": len(encs), "duration": round(total_dur, 1),
                 "abilities": abilities, "heals": heals}
+
+    def combat_profile(self) -> Optional[dict]:
+        """Observed incoming-damage profile over the last 5 pulls — lets
+        the gear advisor express HP deltas in real units ("+75 HP is two
+        average hits") instead of unearned adjectives. None = no data."""
+        encs = ([self.encounter] if self.encounter else []) + list(self.encounter_history)
+        encs = encs[:5]
+        hits = sum(e.get("in_hits", 0) for e in encs)
+        taken = sum(e.get("total_in", 0) for e in encs)
+        if not encs or taken <= 0:
+            return None
+        return {
+            "fights": len(encs),
+            "avg_incoming_hit": round(taken / hits) if hits else None,
+            "avg_taken_per_fight": round(taken / len(encs)),
+        }
 
     def _death_recap(self, e: ev.MyDeath) -> dict:
         """The last 15s of incoming damage, frozen at the moment of death."""
@@ -766,6 +796,8 @@ class CharacterTracker:
             "spell_slots": self.spell_slots,
             "pet_slots": self.pet_slots,
             "pet_classes": self.pet_classes,
+            "max_hp": self.max_hp,
+            "max_mana": self.max_mana,
             "pet_inventory": dict(self.pet_inventory),
             "loadout_hint": self.loadout_hint,
             "owned_aas": {

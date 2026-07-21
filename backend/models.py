@@ -27,6 +27,8 @@ class Character(Base):
     spell_slots = Column(Integer, nullable=True)   # spell slots unlocked via AAs (user-set)
     pet_slots = Column(Integer, nullable=True)     # pet equipment slots (user-set, varies by class)
     pet_classes = Column(String, nullable=True)    # pet's equip class(es), e.g. "Warrior" or "WAR/RNG"
+    max_hp = Column(Integer, nullable=True)        # user-reported (no passive source exists)
+    max_mana = Column(Integer, nullable=True)      # user-reported
     owned_aas = Column(JSON, nullable=True)        # /alternateadv list roster (survives restarts)
     aa_synced = Column(String, nullable=True)      # iso stamp of that listing
     pet_owners = Column(JSON, nullable=True)       # pet -> owner map from leader lines

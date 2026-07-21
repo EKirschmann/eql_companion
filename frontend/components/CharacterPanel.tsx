@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { apiSend } from "@/lib/api";
 import type { Snapshot } from "@/lib/types";
 
@@ -29,6 +29,14 @@ export const CharacterPanel = memo(function CharacterPanel({
   snap: Snapshot | null;
   onSnapChange: (s: Snapshot) => void;
 }) {
+  const [hpDraft, setHpDraft] = useState("");
+  const [manaDraft, setManaDraft] = useState("");
+  useEffect(() => {
+    setHpDraft(snap?.max_hp != null ? String(snap.max_hp) : "");
+  }, [snap?.max_hp]);
+  useEffect(() => {
+    setManaDraft(snap?.max_mana != null ? String(snap.max_mana) : "");
+  }, [snap?.max_mana]);
   if (!snap) {
     return (
       <section className="panel">
@@ -47,6 +55,18 @@ export const CharacterPanel = memo(function CharacterPanel({
   const dpsPct = snap.session_max_dps > 0
     ? Math.min(100, (snap.dps / snap.session_max_dps) * 100)
     : 0;
+
+  const patchVitals = async (field: "max_hp" | "max_mana", raw: string) => {
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v) || v <= 0) return;
+    if (v === (snap[field] ?? null)) return;
+    try {
+      const updated = await apiSend<Snapshot>("/api/character", { [field]: v }, "PATCH");
+      onSnapChange(updated);
+    } catch {
+      /* backend offline — leave as-is */
+    }
+  };
 
   const setPlaystyle = async (playstyle: string) => {
     try {
@@ -74,6 +94,38 @@ export const CharacterPanel = memo(function CharacterPanel({
               <span>At ease</span>
             )}
           </div>
+        </div>
+
+        <div
+          className="vitals-edit"
+          title="The log never prints your max HP/mana — copy them from the in-game UI once (update after level-ups) and gear advice can say what a +75 HP swap really means for you."
+        >
+          <label htmlFor="maxhp">
+            Max HP
+            <input
+              id="maxhp"
+              type="number"
+              min={1}
+              placeholder="?"
+              value={hpDraft}
+              onChange={(e) => setHpDraft(e.target.value)}
+              onBlur={() => patchVitals("max_hp", hpDraft)}
+              onKeyDown={(e) => e.key === "Enter" && patchVitals("max_hp", hpDraft)}
+            />
+          </label>
+          <label htmlFor="maxmana">
+            Max Mana
+            <input
+              id="maxmana"
+              type="number"
+              min={1}
+              placeholder="?"
+              value={manaDraft}
+              onChange={(e) => setManaDraft(e.target.value)}
+              onBlur={() => patchVitals("max_mana", manaDraft)}
+              onKeyDown={(e) => e.key === "Enter" && patchVitals("max_mana", manaDraft)}
+            />
+          </label>
         </div>
 
         {snap.level === null && (

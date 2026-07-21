@@ -128,11 +128,21 @@ def is_loaded() -> bool:
     return _loaded
 
 
+def _lookup_forms(name: str) -> tuple:
+    """Logged spell names carry tier suffixes since 2026-07-07 ("Lifetap
+    IV") — match the raw name AND the suffix-stripped base."""
+    low = name.lower()
+    import re
+    base = re.sub(r"\s+[ivx]{1,5}$", "", low)
+    return (low, base) if base != low else (low,)
+
+
 def is_proc(name: Optional[str]) -> bool:
     """True when the spell file marks `name` as granted-by-trigger.
     False until load() completes (never blocks the caller)."""
-    return bool(name) and name.lower() in _proc_names
+    return bool(name) and any(f in _proc_names for f in _lookup_forms(name))
 
 
 def is_lifetap(name: Optional[str]) -> bool:
-    return bool(name) and name.lower() in _lifetap_names
+    return bool(name) and any(f in _lifetap_names
+                              for f in _lookup_forms(name))

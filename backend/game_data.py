@@ -18,6 +18,7 @@ Wiki text shapes this parser expects (verified 2026-07-06):
 import logging
 import math
 import re
+from pathlib import Path
 from typing import List, Optional
 
 from backend.cache import wiki_page_cache
@@ -612,13 +613,182 @@ async def item_line(name: str) -> Optional[str]:
         return cached or None
     page = await get_mcp_client().wiki_page(base, max_characters=4000)
     if page is None:
-        # no page OR wiki down — indistinguishable here, so cache the miss
-        # briefly (1h) rather than re-fetching 40+ consumables per consult
+        # exact title missed — fuzzy-resolve (punctuation/case drift
+        # between export names and page titles)
+        try:
+            alt = await _resolve_item_title(base)
+        except Exception:
+            alt = None
+        if alt and alt.lower() != base.lower():
+            page = await get_mcp_client().wiki_page(alt, max_characters=4000)
+    if page is None:
+        # no page OR wiki down — indistinguishable here. Serve the last
+        # good parse when one exists (stale beats nothing), else cache
+        # the miss briefly (1h) rather than re-fetching 40+ consumables
+        # per consult
+        stale = wiki_page_cache.get_stale("item_line2", key)
+        if stale:
+            return stale
         wiki_page_cache.set("", 3600, "item_line2", key)
         return None
     line = _compact_item(page.get("text", ""))
     wiki_page_cache.set(line or "", WIKI_TTL, "item_line2", key)
     return line
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein (iterative DP) — no dependency."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[-1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+async def _resolve_item_title(name: str) -> Optional[str]:
+    """Fuzzy name -> wiki page title: MediaWiki search, then the hit with
+    the best normalized edit distance (small rank penalty breaks ties).
+    Resolves export/log names that drift from page titles. Pattern from
+    DavisChappins/eql-tooltip (MIT)."""
+    from backend.wiki_http import search_pages
+    results = await search_pages(name, limit=8)
+    if not results:
+        # the wiki search is strict ("Barons" never matches "Baron's") —
+        # retry with per-word trailing-s stripped; the edit-distance pick
+        # against the ORIGINAL name still guards the match
+        loosened = re.sub(r"(\w)s\b", r"\1", name)
+        if loosened != name:
+            results = await search_pages(loosened, limit=8)
+    low = name.lower()
+    best, best_score = None, 0.35  # above this = probably a different item
+    for i, r in enumerate(results):
+        title = r.get("title") or ""
+        d = _edit_distance(low, title.lower())
+        score = d / max(len(low), len(title), 1) + i * 0.02
+        if score < best_score:
+            best, best_score = title, score
+    return best
+
+
+# Acquisition sections exist ONLY in rendered HTML — the {{Itempage}}
+# template emits them, so wikitext lacks them. Extraction approach from
+# DavisChappins/eql-tooltip (MIT).
+ACQ_SECTIONS = (("Drops_From", "Drops From"), ("Sold_by", "Sold by"),
+                ("Related_quests", "Related quests"),
+                ("Player_crafted", "Player crafted"),
+                ("Tradeskill_recipes", "Tradeskill recipes"))
+_ACQ_BOILER = ("not dropped by mobs", "cannot be purchased",
+               "no related quests", "not crafted by players",
+               "not used in player tradeskills")
+
+
+def _acq_section(html: str, sec_id: str) -> Optional[str]:
+    """Inner HTML between <h2 id=sec_id> (possibly inside the modern
+    mw-heading wrapper div) and the next heading."""
+    m = re.search(rf'<h2[^>]*id="{sec_id}"', html)
+    if not m:
+        return None
+    tail = html[m.end():]
+    body_start = tail.find("</h2>")
+    if body_start < 0:
+        return None
+    tail = tail[body_start + 5:]
+    nxt = re.search(r'<h2[\s>]|<div class="mw-heading', tail)
+    return tail[:nxt.start()] if nxt else tail
+
+
+def _acq_lines(section_html: str) -> list:
+    """<p> = zone sub-heading, <li> = mob/vendor row; tags stripped; the
+    template's empty-section filler is tagged kind=note."""
+    out = []
+    for m in re.finditer(r"<(p|li)[^>]*>(.*?)</\1>", section_html, re.S):
+        txt = re.sub(r"<[^>]+>", "", m.group(2))
+        txt = re.sub(r"\s+", " ", txt).strip()
+        if not txt:
+            continue
+        boiler = any(b in txt.lower() for b in _ACQ_BOILER)
+        out.append({"text": txt,
+                    "kind": ("note" if boiler else
+                             "zone" if m.group(1) == "p" else "entry")})
+        if len(out) >= 14:
+            break
+    return out
+
+
+async def item_acquisition(name: str) -> dict:
+    """Where an item comes from (drops / vendors / quests / crafting),
+    parsed from the RENDERED item page — feeds the gear-tab hover cards.
+    Cached 24h; misses 1h; stale served when a refresh fails."""
+    base = _strip_upgrade(name)
+    key = base.lower()
+    cached = wiki_page_cache.get("item_acq1", key)
+    if cached is not None:
+        return cached
+    from backend.wiki_http import fetch_page_html
+    html = await fetch_page_html(base)
+    if html is None:
+        stale = wiki_page_cache.get_stale("item_acq1", key)
+        if stale is not None:
+            return stale
+        miss = {"item": base, "sections": [], "available": False}
+        wiki_page_cache.set(miss, 3600, "item_acq1", key)
+        return miss
+    sections = []
+    for sec_id, label in ACQ_SECTIONS:
+        body = _acq_section(html, sec_id)
+        if not body:
+            continue
+        rows = _acq_lines(body)
+        # keep sections with real content; solitary boilerplate is noise
+        if rows and not all(r["kind"] == "note" for r in rows):
+            sections.append({"label": label, "lines": rows})
+    out = {"item": base, "sections": sections, "available": bool(sections)}
+    wiki_page_cache.set(out, WIKI_TTL, "item_acq1", key)
+    return out
+
+
+# ------------------------------------------------------------ class guides
+CLASS_GUIDES_DIR = Path("class_guides")
+
+
+# reference files loaded ONLY for the main advisor consult (the gear
+# consult keeps its prompt lean — race/stance/ritual data rarely moves
+# an equipment decision)
+REF_GUIDES = ("races", "stances_invocations", "rituals")
+
+
+def class_guide_text(classes, max_chars_per: int = 2600,
+                     include_refs: bool = False) -> str:
+    """Curated .md guides (community wisdom, maintained by hand — see
+    class_guides/README.md). general.md (cross-class mechanics + meta)
+    loads FIRST for every trio, then reference files when include_refs,
+    then one file per full class name (lowercase, spaces as
+    underscores). Empty string when none exist."""
+    names = (["general"] + (list(REF_GUIDES) if include_refs else [])
+             + [str(c).strip().lower().replace(" ", "_")
+                for c in classes or []])
+    seen: set = set()
+    parts = []
+    for nm in names:
+        if not nm or nm in seen:
+            continue
+        seen.add(nm)
+        fn = CLASS_GUIDES_DIR / (nm + ".md")
+        try:
+            txt = fn.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if txt:
+            cap = 3400 if nm in ("general",) + REF_GUIDES else max_chars_per
+            title = ("General (all trios)" if nm == "general"
+                     else nm.replace("_", " ").title())
+            parts.append(f"### {title}\n{txt[:cap]}")
+    return "\n\n".join(parts)
 
 
 def _trio_usable(line: str, classes: list) -> Optional[bool]:
@@ -779,11 +949,26 @@ def _zone_band(z: dict) -> tuple:
     return min(pool), max(pool)
 
 
+# Zones revamped by PATCH NOTES newer than the community sheet — the
+# override wins on the level BAND (the sheet's per-level quality circles
+# stay authoritative where they exist). Prune entries when the sheet
+# catches up.
+PATCH_BAND_OVERRIDES = {
+    "crushbone": (4, 22, "revamped in the 2026-07-14 patch: now levels "
+                         "4-22 with new loot and enemies"),
+    "splitpaw lair": (25, 42, "revamped in the 2026-07-14 patch: 25-28 at "
+                              "the entrance ramping to 40-42, with "
+                              "boosted rare-spawn and drop rates"),
+}
+
+
 async def hunting_candidates(level: int) -> list:
     """Non-city in-era zones fitting the level. Quality comes from the
     community circles: efficient > ok; range-only rows count as ok. Cities
     are excluded by their Type column UNLESS the row carries efficient
-    marks (the sheet is mid-edit and some hunting zones are mistyped)."""
+    marks (the sheet is mid-edit and some hunting zones are mistyped).
+    PATCH_BAND_OVERRIDES supersede the sheet's level bands for zones the
+    devs revamped after the sheet's last edit."""
     zones = await zem_zone_levels()
     col = max(1, 5 * (level // 5))
     out = []
@@ -793,6 +978,15 @@ async def hunting_candidates(level: int) -> list:
         if z["type"] == "City" and not has_eff:
             continue
         lo, hi = _zone_band(z)
+        note = None
+        ov = PATCH_BAND_OVERRIDES.get(zone.lower())
+        if ov:
+            lo, hi, note = ov
+            # the sheet's per-level circles predate the revamp — drop
+            # marks outside the patched band so stale ratings can't
+            # resurface the old range
+            tiers = {l: t for l, t in tiers.items() if lo <= l <= (hi or lo)}
+            has_eff = "efficient" in tiers.values()
         if lo is None:
             continue
         tier_here = tiers.get(col) or tiers.get(col + 5)
@@ -808,6 +1002,7 @@ async def hunting_candidates(level: int) -> list:
             "band": f"{lo}-{hi or lo}",
             "at_level": quality != "stretch",
             "quality": quality,
+            "note": note,
             "marks": [m for m in marked if m in (col, col + 5)],
             "levels": marked or [l for l in range(lo, (hi or lo) + 1)
                                  if l % 5 == 0 or l == lo],

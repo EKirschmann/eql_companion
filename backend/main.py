@@ -64,7 +64,8 @@ with engine.connect() as _conn:
     for _col, _typ in (("aa_available", "INTEGER"), ("spell_slots", "INTEGER"),
                        ("pet_slots", "INTEGER"), ("pet_classes", "TEXT"),
                        ("owned_aas", "TEXT"), ("aa_synced", "TEXT"),
-                       ("pet_owners", "TEXT")):
+                       ("pet_owners", "TEXT"), ("max_hp", "INTEGER"),
+                       ("max_mana", "INTEGER")):
         if _col not in _cols:
             _conn.exec_driver_sql(f"ALTER TABLE characters ADD COLUMN {_col} {_typ}")
     _conn.commit()
@@ -147,6 +148,8 @@ def _load_character_enrichment() -> None:
     tracker.spell_slots = row.spell_slots
     tracker.pet_slots = row.pet_slots
     tracker.pet_classes = row.pet_classes
+    tracker.max_hp = row.max_hp
+    tracker.max_mana = row.max_mana
     if row.owned_aas:
         tracker.owned_aas = dict(row.owned_aas)
         if row.aa_synced:
@@ -521,7 +524,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.9.1"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.10.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -562,6 +565,8 @@ class CharacterPatch(BaseModel):
     spell_slots: Optional[int] = None
     pet_slots: Optional[int] = None
     pet_classes: Optional[str] = None
+    max_hp: Optional[int] = None    # user-reported from the in-game UI
+    max_mana: Optional[int] = None
 
 
 @app.get("/health")
@@ -583,7 +588,8 @@ async def get_character():
 async def patch_character(patch: CharacterPatch, db: Session = Depends(get_db)):
     row = _sync_character_row(db)
     for field in ("playstyle", "class_str", "race", "level",
-                  "aa_available", "spell_slots", "pet_slots", "pet_classes"):
+                  "aa_available", "spell_slots", "pet_slots", "pet_classes",
+                  "max_hp", "max_mana"):
         value = getattr(patch, field)
         if value is not None:
             setattr(row, field, value)
@@ -1020,6 +1026,7 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     global _gear_cache, _gear_sig
     inv = load_export(tracker.name, tracker.server, "Inventory")
     sig = (tracker.class_str, tracker.level, tracker.race, tracker.pet_slots,
+           tracker.max_hp, tracker.max_mana,
            tuple(sorted(tracker.pet_inventory.items())),
            inv["updated"] if inv else None)
     sig = _sig_norm(sig)
@@ -1036,11 +1043,21 @@ async def get_gear(refresh: bool = False, cached: bool = False):
            "exaltations": (inv or {}).get("exaltations"),
            "pet_slots": tracker.pet_slots,
            "pet_classes": tracker.pet_classes,
-           "pet_inventory": dict(tracker.pet_inventory)}
+           "pet_inventory": dict(tracker.pet_inventory),
+           "max_hp": tracker.max_hp, "max_mana": tracker.max_mana,
+           "combat": tracker.combat_profile()}
     advice = await generate_gear_advice(ctx)
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()
     return advice
+
+
+@app.get("/api/item-acquisition")
+async def get_item_acquisition(name: str):
+    """Where an item comes from (drops/vendors/quests/crafting) — feeds
+    the gear-tab hover cards. Wiki-mined, cached."""
+    from backend.game_data import item_acquisition
+    return await item_acquisition(name)
 
 
 @app.get("/api/map")

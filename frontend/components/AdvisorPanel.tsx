@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiSend } from "@/lib/api";
+import { ItemHover } from "./ItemHover";
 import type { Advice, ExportsStatus, GearAdvice, HuntingData, LlmInfo, OwnedAAsInfo, Snapshot, SpellbookInfo } from "@/lib/types";
 
 const CLASSES = [
@@ -754,9 +755,9 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                         }
                       >
                         <td className="adv-cls">{s.slot}</td>
-                        <td>{s.current || "—"}</td>
+                        <td>{s.current ? <ItemHover name={s.current} /> : "—"}</td>
                         <td>
-                          <strong>{s.recommend ?? "—"}</strong>
+                          <strong>{s.recommend ? <ItemHover name={s.recommend} /> : "—"}</strong>
                           {s.where && (
                             <span className="adv-cls"> ({s.where})</span>
                           )}
@@ -766,6 +767,35 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                     ))}
                   </tbody>
                 </table>
+              )}
+              {gear && (gear.merges?.length ?? 0) > 0 && (
+                <>
+                  <div
+                    className="adv-sub"
+                    style={{ marginTop: 10 }}
+                    title="Two copies of the same base item can be merged in-game to advance its +N. Equal ranks merge to exactly one rank up; unequal ranks add partial progress (wiki upgrade-progression model)."
+                  >
+                    Merge opportunities — duplicate items you own
+                  </div>
+                  <ul className="adv-list">
+                    {(gear.merges ?? []).map((m) => (
+                      <li key={m.item}>
+                        <strong><ItemHover name={m.item} /></strong>
+                        <span className="adv-cls">
+                          {" "}— {m.copies.join(" + ")} → merges to {m.result}
+                        </span>
+                        {m.hosts_exalt && (
+                          <>
+                            <br />
+                            <span className="adv-cls">
+                              a copy hosts an exaltation stone — check it before merging
+                            </span>
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
               {(() => {
                 const petInv = snap?.pet_inventory ?? {};
@@ -799,7 +829,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                           {recs.map((p) => (
                             <tr key={p.item}>
                               <td>
-                                <strong>{p.item}</strong>
+                                <strong><ItemHover name={p.item} /></strong>
                                 {p.where && <span className="adv-cls"> ({p.where})</span>}
                               </td>
                               <td className="adv-why">{p.why}</td>
@@ -845,7 +875,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   <ul className="adv-list">
                     {gear.farm.map((f) => (
                       <li key={f.item}>
-                        <strong>{f.item}</strong>
+                        <strong><ItemHover name={f.item} /></strong>
                         {f.slot && <span className="adv-cls"> ({f.slot})</span>}
                         {f.zone && (
                           <>

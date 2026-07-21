@@ -176,6 +176,14 @@ def extract_character_from_filename(path: Path) -> tuple[Optional[str], Optional
     return m.group("name"), m.group("server")
 
 
+def strip_tier(name: str) -> str:
+    """'Lay on Hands VI' -> 'Lay on Hands'. Since the 2026-07-07 patch,
+    logged spell names carry their upgrade tier as a roman-numeral suffix.
+    Match against BOTH forms — classic base names can end in numerals too
+    (Yaulp II is a real spell)."""
+    return re.sub(r"\s+[IVX]{1,5}$", "", name or "")
+
+
 def _verb_root(verb: str) -> Optional[str]:
     v = verb.lower()
     if v in MELEE_VERBS:
@@ -207,7 +215,7 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
 
     # strip stacked combat tags right-to-left; the raw ledger line keeps them
     body, tags = msg, []
-    if " damage" in msg:
+    if " damage" in msg or " hit points" in msg:
         while (t := RE_TAG.match(body)):
             body = t.group(1).rstrip()
             tags.append(t.group(2))
@@ -338,14 +346,15 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
     if bf := RE_BUFF_FADE.match(body):
         return ev.BuffFade(spell=bf.group(1), **base)
     if h := RE_HEAL.match(body):
-        return ev.HealReceived(amount=int(h.group(1)), **base)
+        return ev.HealReceived(amount=int(h.group(1)), crit=crit, **base)
     if ho := RE_HEAL_OUT.match(body):
         return ev.HealOut(target=ho.group(1), over_time=bool(ho.group(2)),
-                          amount=int(ho.group(3)), spell=ho.group(4), **base)
+                          amount=int(ho.group(3)), spell=ho.group(4),
+                          crit=crit, **base)
     if oh := RE_OTHER_HEAL.match(body):
         return ev.OtherHeal(healer=oh.group(1), target=oh.group(2),
                             over_time=bool(oh.group(3)), amount=int(oh.group(4)),
-                            spell=oh.group(5), **base)
+                            spell=oh.group(5), crit=crit, **base)
 
     if om := RE_OUT_MELEE.match(body):
         verb = _verb_root(om.group(1))

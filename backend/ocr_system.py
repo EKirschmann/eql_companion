@@ -111,6 +111,10 @@ def _capture_and_ocr(region: dict, prev_hash: Optional[str] = None):
         return None, frame_hash
     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
+    # contrast stretch markedly improves recognition of EQ's small
+    # semi-transparent UI text (technique from DavisChappins/eql-tooltip)
+    from PIL import ImageEnhance
+    img = ImageEnhance.Contrast(img).enhance(1.7)
     if _OCR_V2:
         out = _get_engine()(np.array(img))
         return "\n".join(list(getattr(out, "txts", None) or [])), frame_hash

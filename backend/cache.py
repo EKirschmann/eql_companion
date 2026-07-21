@@ -16,14 +16,22 @@ class Cache:
         return hashlib.md5(key_data.encode()).hexdigest()
 
     def get(self, *args, **kwargs) -> Optional[Any]:
-        """Get cached value if not expired."""
+        """Get cached value if not expired. Expired entries are KEPT so
+        get_stale() can serve them when a refresh fails (stale beats
+        nothing); cleanup_expired() prunes if memory ever matters."""
         key = self._key(*args, **kwargs)
         if key in self.store:
             value, expiry = self.store[key]
             if time.time() < expiry:
                 return value
-            else:
-                del self.store[key]
+        return None
+
+    def get_stale(self, *args, **kwargs) -> Optional[Any]:
+        """Cached value regardless of expiry — graceful degradation when
+        the fresh fetch fails."""
+        key = self._key(*args, **kwargs)
+        if key in self.store:
+            return self.store[key][0]
         return None
 
     def set(self, value: Any, ttl: int | None = None, *args, **kwargs) -> None:

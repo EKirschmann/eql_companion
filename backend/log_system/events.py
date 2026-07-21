@@ -184,6 +184,7 @@ class OtherHeal(LogEvent):
     amount: int
     spell: str
     over_time: bool = False
+    crit: bool = False  # heal crits log since the 2026-07-07 patch
 
 
 class MissIn(LogEvent):
@@ -249,6 +250,7 @@ class BuffFade(LogEvent):
 class HealReceived(LogEvent):
     type: str = "heal_in"
     amount: int
+    crit: bool = False
 
 
 class HealOut(LogEvent):
@@ -258,6 +260,7 @@ class HealOut(LogEvent):
     amount: int
     spell: str
     over_time: bool = False
+    crit: bool = False
 
 
 class LocUpdate(LogEvent):

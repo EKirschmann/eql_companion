@@ -270,6 +270,13 @@ whenever the Inventory parse changes.
   already-scaled line. STATS UNKNOWN items are still never replaced.
 - Gear is usable if ANY ONE of the trio can use it (`[USABLE]` pre-tags;
   wiki Race: lines are stale classic-era data and are stripped).
+- **Merge notices** (`_merge_opportunities`, deterministic, every gear
+  consult incl. builtin): 2+ owned copies of one base item (any mix of
+  worn/bags/bank; wiki-gated to real equipment so stacks never flag) list
+  under "Merge opportunities" with the predicted result from the wiki
+  slider progression model — an item at +N embodies 2^N base copies, so
+  equal ranks merge to exactly +N+1, unequal ranks to partial progress
+  ("+4 + 1/16"). Copies hosting an exaltation stone are flagged.
 - A 2H primary recommendation deterministically drops the secondary rec.
 - Deterministic gates every gear rec must pass: it must be OWNED, fit the
   item's wiki **Slot** line, be **trio-usable** (the `[USABLE]` tag is
@@ -330,6 +337,24 @@ types (13/20) drive the synthesized self-heal — your OWN taps log no heal
 line at all. Loaded in a worker thread at startup (~0.4s); fail-soft
 empty sets without the file. Item-granted weapon procs are NOT in the
 spell file (known limit).
+
+Item pages also feed **acquisition hover cards** (`item_acquisition` in
+game_data.py -> `GET /api/item-acquisition` -> ItemHover.tsx on every item
+name in the gear tab): Drops From / Sold by / quests / crafting parsed
+from the RENDERED page HTML (`fetch_page_html`) — those sections exist
+ONLY in rendered HTML ({{Itempage}} emits them; wikitext lacks them).
+Extraction pattern from DavisChappins/eql-tooltip (MIT). Misses on exact
+titles fuzzy-resolve via wiki search + normalized edit distance
+(`_resolve_item_title`; strict search gets a trailing-s-stripped retry),
+and wiki caches serve STALE data when a refresh fails (`Cache.get_stale`
+— expired entries are kept, never deleted on read).
+
+**Class guides** (`class_guides/*.md`, one per full class name lowercase/
+underscored): curated community playstyle wisdom injected into BOTH
+consults for each class in the trio (first ~2600 chars advisor / ~1500
+gear — front-load the decision-relevant facts). See class_guides/README.md
+for curation rules; update after patches by hand — nothing regenerates
+them.
 
 `builds_data.py` reads the eqlbuilds.com dataset snapshot that ships inside
 the MCP clone (dist/data/eqlbuilds — CI-refreshed): per-class spell lists

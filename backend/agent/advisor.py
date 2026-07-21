@@ -133,7 +133,8 @@ def _build_prompt(ctx: dict, wiki: str) -> str:
         def fmt(c):
             q = c.get("quality")
             tag = {"efficient": "EFFICIENT exp here", "ok": "doable"}.get(q, q)
-            return f"{c['zone']} ({c['band']}, {tag})"
+            note = f" — {c['note']}" if c.get("note") else ""
+            return f"{c['zone']} ({c['band']}, {tag}{note})"
         at_lv = [c for c in hunt if c.get("at_level")]
         stretch = [c for c in hunt if not c.get("at_level")]
         txt = "; ".join(fmt(c) for c in at_lv[:20])
@@ -166,6 +167,14 @@ def _build_prompt(ctx: dict, wiki: str) -> str:
         lines.append("- Spellbook: NO export found — counsel loadout from the wiki "
                      "tables instead and tell the user to type /outputfile "
                      "spellbook in-game for owned-spell grounding.")
+    from backend.game_data import class_guide_text
+    guides = class_guide_text(
+        [x.strip() for x in (ctx.get("class_str") or "").split("/")
+         if x.strip()], include_refs=True)
+    if guides:
+        lines.append("- Community class guides (curated .md files in "
+                     "class_guides/ — battle-tested playstyle wisdom; may "
+                     "lag game patches, weigh against live data):\n" + guides)
     slots = ctx.get("spell_slots")
     aa = ctx.get("aa_available")
     return (ADVISOR_PROMPT
@@ -998,6 +1007,7 @@ Reply with ONLY a JSON object (no fences, no prose):
 
 Rules:
 - slots: go slot by slot; only include a slot when there is something to say — a better OWNED item sitting in bags/bank than what is worn ("recommend" = that owned item, exactly as named above), an empty slot they own a filler for, or a confirmation that the worn item is their best ("recommend" = the worn item). Recommend only [USABLE] items; the tag is authoritative. Race restrictions DO NOT EXIST in EQL. Anything marked [worn] is being worn RIGHT NOW and is proven equippable — never claim a worn item is unusable.
+- Stat-delta language: you know the character's totals ONLY when CHARACTER lists them (Max HP / Max mana / recent combat). NEVER label a stat change "huge", "massive", "tiny", "minor" or similar on its own authority — give the numbers. When Max HP is listed, express HP deltas as a rough percentage of it ("+75 HP ≈ +5.6% of your 1342"); when recent-combat numbers are listed, you may translate HP deltas into average incoming hits ("+75 HP ≈ 2 average hits of survival"). With neither, state the delta neutrally and let the numbers speak.
 - Hands: a weapon with a 2H skill (2H Slash/2H Blunt/2H Piercing) occupies BOTH Primary and Secondary. Never recommend a 2H weapon together with any Secondary item; compare 1H+1H (or 1H+shield) as a package against the 2H alone.
 - farm: 3-6 realistic upgrade targets for their level. STRONGLY prefer items whose drop data appears above or that you know drop in zones near their level; give the zone and the mob/vendor in "source". Never invent stats; mark uncertainty briefly in "why" when relying on memory.
 - Weapons: consider the classes' usable weapon skills; for a Monk trio prefer fist/blunt options.
@@ -1126,6 +1136,50 @@ async def _exalt_targets(stone_name: str, styp: str,
     return out
 
 
+async def _merge_opportunities(items: list, exalts: list) -> list:
+    """Duplicate owned EQUIPMENT is an EQL merge opportunity: two copies
+    of the same base item combine toward the next +N. Deterministic
+    notice only — grouped by base name across worn/bags/bank, filtered
+    to real equipment via the wiki gate (no consumable stacks), result
+    predicted with the wiki slider's own progression model (an item at
+    +N embodies 2^N base copies, so equal ranks merge to exactly +N+1
+    and unequal ranks land partway: a +4 and a +0 give "+4 + 1/16")."""
+    from backend.game_data import item_line
+    groups: dict = {}
+    for it in items:
+        b = _item_base(it["name"])
+        g = groups.setdefault(b.lower(), {"base": b, "copies": []})
+        g["copies"].append({"rank": _item_rank(it["name"]),
+                            "where": it.get("where") or "?"})
+    hosts = {_item_base(x.get("host") or "").lower()
+             for x in exalts if x.get("host")}
+    out = []
+    for key, g in groups.items():
+        if len(g["copies"]) < 2:
+            continue
+        try:
+            line = await item_line(g["base"])
+        except Exception:
+            line = None
+        if not line:  # not equipment — merging is a gear mechanic
+            continue
+        total = sum(2 ** c["rank"] for c in g["copies"])
+        full = total.bit_length() - 1
+        remainder = total - (1 << full)
+        result = f"+{full}" + (f" + {remainder}/{1 << full}" if remainder else "")
+        copies = sorted(g["copies"], key=lambda c: -c["rank"])
+        out.append({
+            "item": g["base"],
+            "copies": [f"+{c['rank']} ({c['where']})" for c in copies],
+            "result": result,
+            "hosts_exalt": key in hosts,
+        })
+        if len(out) >= 12:
+            break
+    out.sort(key=lambda m: m["item"].lower())
+    return out
+
+
 async def generate_gear_advice(ctx: dict) -> dict:
     from backend.game_data import build_gear_context
 
@@ -1135,6 +1189,10 @@ async def generate_gear_advice(ctx: dict) -> dict:
         "context": {"classes": ctx.get("class_str"), "level": ctx.get("level"),
                     "race": ctx.get("race"),
                     "items": len(items)},
+        # deterministic duplicate-item merge notices — every return path
+        # (LLM, builtin, fallback) carries them
+        "merges": await _merge_opportunities(items,
+                                             ctx.get("exaltations") or []),
     }
     if not items:
         return {**base, "source": "builtin", "note":
@@ -1229,14 +1287,30 @@ async def generate_gear_advice(ctx: dict) -> dict:
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 
+    combat = ctx.get("combat")
+    combat_line = (
+        f"- Recent combat (last {combat['fights']} fights): avg incoming "
+        f"hit {combat['avg_incoming_hit'] or '?'}, avg "
+        f"{combat['avg_taken_per_fight']} damage taken per fight"
+        if combat else "- Recent combat: no data this session")
     lines = [
         f"- Classes: {ctx.get('class_str') or 'unknown'}",
         f"- Level: {ctx.get('level') or 'unknown'}",
         f"- Race: {ctx.get('race') or 'unknown'}",
         f"- Focus: {ctx.get('playstyle') or 'balanced'}",
+        f"- Max HP: {ctx.get('max_hp') or 'unknown (user has not set it)'}"
+        + (f" · Max mana: {ctx.get('max_mana')}" if ctx.get('max_mana')
+           else " · Max mana: unknown"),
+        combat_line,
         f"- Currently worn: "
         + "; ".join(f"{k}: {v}" for k, v in sorted((ctx.get('worn') or {}).items())),
     ]
+    from backend.game_data import class_guide_text
+    guides = class_guide_text(classes, max_chars_per=1500)
+    if guides:
+        lines.append("- Community class guides (playstyle + pet-gear "
+                     "wisdom, curated in class_guides/*.md; may lag "
+                     "patches):\n" + guides)
     pet_inv = ctx.get("pet_inventory") or {}
     player_classes = [c.strip() for c in (ctx.get("class_str") or "").split("/")
                       if c.strip()]

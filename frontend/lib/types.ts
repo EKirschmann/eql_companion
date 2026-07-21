@@ -168,6 +168,9 @@ export interface ZoneGeometry3D {
 export interface Snapshot {
   pet_slots?: number | null;
   pet_classes?: string | null;
+  /** User-reported from the in-game UI — the log never prints them. */
+  max_hp?: number | null;
+  max_mana?: number | null;
   pet_inventory?: Record<string, string>;
   name: string;
   server: string;
@@ -325,9 +328,19 @@ export interface PetGear {
   where?: string;
 }
 
+export interface GearMerge {
+  item: string;
+  /** e.g. ["+6 (bank)", "+0 (bags)"] — highest rank first. */
+  copies: string[];
+  /** Predicted merge result per the wiki upgrade-progression model. */
+  result: string;
+  hosts_exalt?: boolean;
+}
+
 export interface GearAdvice {
   stale?: boolean;
   pet_gear?: PetGear[];
+  merges?: GearMerge[];
   source: "llm" | "builtin";
   generated: string;
   note: string | null;
