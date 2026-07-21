@@ -992,7 +992,7 @@ __CONTEXT__
 OWNED EQUIPMENT (from /outputfile inventory; [worn/bags/bank] shows where each lives; stats and drop sources are from the game's wiki):
 __GEAR__
 
-EXALTATIONS (socketable effect-stones extracted from items — for CONTEXT only; the app reports them separately, do NOT recommend moving them). A stone adds value to its host ONLY while its effect is USABLE by the trio AND its level requirement is met: when comparing items for a slot, count ACTIVE socketed stones as part of the host's value and DORMANT/unusable ones as zero. Item Effect lines follow the same rule — "at Level N" effects below the character's level are worth nothing yet.
+EXALTATIONS (socketable effect-stones extracted from items — for CONTEXT only; the app reports them separately, do NOT recommend moving them). Stones move between owned items at NO cost (within class/slot legality), so when comparing two OWNED items for a slot, IGNORE any socketed stone that could legally move to the challenger — the stone follows the winner. Count a stone toward its host's value only when it could NOT legally move. PROC stones may only fire from the PRIMARY slot (confirmed for several stones): never count a proc as value on an item you recommend for Secondary or Range, and when a swap strands a proc stone off-primary, say so in the why (e.g. "move its stone into your primary first"). A stone adds value ONLY while usable by the trio AND its level requirement is met; DORMANT/unusable stones are zero. Item Effect lines follow the same rule — "at Level N" effects below the character's level are worth nothing yet.
 __EXALTS__
 
 __PET_BLOCK__
@@ -1143,8 +1143,11 @@ async def _merge_opportunities(items: list, exalts: list) -> list:
     to real equipment via the wiki gate (no consumable stacks), result
     predicted with the wiki slider's own progression model (an item at
     +N embodies 2^N base copies, so equal ranks merge to exactly +N+1
-    and unequal ranks land partway: a +4 and a +0 give "+4 + 1/16")."""
-    from backend.game_data import item_line
+    and unequal ranks land partway: a +4 and a +0 give "+4 + 1/16").
+    When BOTH copies are WORN (paired slots: ears/wrists/fingers/any),
+    merging EMPTIES a slot — the notice quantifies the stat loss so the
+    user never trades two bracers for one blindly."""
+    from backend.game_data import item_line, item_stat_vector, scale_item_line
     groups: dict = {}
     for it in items:
         b = _item_base(it["name"])
@@ -1168,11 +1171,31 @@ async def _merge_opportunities(items: list, exalts: list) -> list:
         remainder = total - (1 << full)
         result = f"+{full}" + (f" + {remainder}/{1 << full}" if remainder else "")
         copies = sorted(g["copies"], key=lambda c: -c["rank"])
+        worn = [c for c in copies if c["where"] == "worn"]
+        compare = None
+        if len(worn) >= 2:
+            # paired-slot pair worn: merging empties a slot — quantify it
+            va = item_stat_vector(scale_item_line(line, worn[0]["rank"]))
+            vb = item_stat_vector(scale_item_line(line, worn[1]["rank"]))
+            vm = item_stat_vector(scale_item_line(line, full))
+            keys = [k for k in va if k != "DELAY"][:5]
+
+            def _fmtv(v):
+                return ", ".join(
+                    f"{k.replace('_', ' ')} {int(v.get(k, 0))}"
+                    for k in keys if v.get(k))
+            pair_total = {k: va.get(k, 0) + vb.get(k, 0) for k in keys}
+            compare = (f"BOTH copies are worn — merging empties a slot: "
+                       f"wearing both = {_fmtv(pair_total)}; merged "
+                       f"+{full} alone = {_fmtv(vm)}. Keep both unless a "
+                       "better filler exists for the freed slot")
         out.append({
             "item": g["base"],
             "copies": [f"+{c['rank']} ({c['where']})" for c in copies],
             "result": result,
             "hosts_exalt": key in hosts,
+            "worn_pair": len(worn) >= 2,
+            "compare": compare,
         })
         if len(out) >= 12:
             break
@@ -1284,6 +1307,28 @@ async def generate_gear_advice(ctx: dict) -> dict:
             "why": (eff_txt + (f" — {status}" if status else "")).strip(" —")
                    or status,
         })
+    # decorate gear lines with hosted stones — the model compares ITEMS
+    # from these lines, so the stone must be visible at the decision
+    # point, not only in the separate exaltations block
+    host_notes: dict = {}
+    for x in exalts:
+        if not x.get("host"):
+            continue
+        snm = re.sub(r"\s*[(]Exaltation[)]$", "", x["name"]).strip()
+        styp2 = None
+        for info in exalt_info:
+            if info["name"].lower() == snm.lower():
+                styp2 = _exalt_socket_type(info.get("why"))
+                break
+        tagtxt = (f"{snm} (proc — may only fire from PRIMARY)"
+                  if styp2 == "proc" else snm)
+        host_notes.setdefault(_item_base(x["host"]).lower(), []).append(tagtxt)
+    if host_notes:
+        for i, ln in enumerate(gear["lines"]):
+            nm = ln.split(" [", 1)[0]
+            notes = host_notes.get(_item_base(nm).lower())
+            if notes:
+                gear["lines"][i] = ln + " | HOSTS EXALTATION: " + "; ".join(notes)
     base["context"]["with_stats"] = len(gear["lines"])
     base["context"]["unknown"] = len(gear["unknown"])
 

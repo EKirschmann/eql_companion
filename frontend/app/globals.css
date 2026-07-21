@@ -1735,3 +1735,5 @@ button.app-version:hover { color: var(--gold-bright); }
 .item-hover-line[data-kind="zone"] { color: var(--milestone); }
 .item-hover-line[data-kind="note"] { color: var(--muted); font-style: italic; }
 .item-hover-note { display: block; color: var(--muted); font-style: italic; }
+
+.adv-merge-warn { color: var(--dmg-in); font-size: 11.5px; }

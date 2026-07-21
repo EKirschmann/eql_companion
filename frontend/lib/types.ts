@@ -335,6 +335,10 @@ export interface GearMerge {
   /** Predicted merge result per the wiki upgrade-progression model. */
   result: string;
   hosts_exalt?: boolean;
+  /** Both copies are worn (paired slot) — merging empties a slot. */
+  worn_pair?: boolean;
+  /** Quantified two-worn vs merged-one stat comparison. */
+  compare?: string | null;
 }
 
 export interface GearAdvice {

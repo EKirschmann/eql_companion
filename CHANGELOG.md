@@ -4,6 +4,22 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.10.1 — 2026-07-21
+
+Smarter merge notices and exaltation-aware weapon advice:
+
+- **Merging worn pairs is no longer suggested blindly.** When both
+  copies of an item are worn (ears/wrists/fingers), the merge notice
+  shows the real trade in red — e.g. wearing two +4 bracers gives
+  AC 20 / HP 18 while the merged +5 alone gives AC 11 / HP 10 — and
+  says to keep both unless a better filler exists for the freed slot.
+- **Weapon swaps respect exaltation stones.** Item lines in the
+  consult now show which stones they host, and the advisor follows the
+  real rules: stones move between your items for free, so they follow
+  the better weapon instead of anchoring the worse one — but proc
+  stones may only fire from the Primary slot, so a swap that would
+  strand a proc off-hand now says "move its stone into your primary
+  first" instead of silently wasting it.
 ## v1.10.0 — 2026-07-21
 
 The knowledge release: the advisor now consults curated class guides,

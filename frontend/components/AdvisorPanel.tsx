@@ -784,6 +784,12 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                         <span className="adv-cls">
                           {" "}— {m.copies.join(" + ")} → merges to {m.result}
                         </span>
+                        {m.compare && (
+                          <>
+                            <br />
+                            <span className="adv-merge-warn">{m.compare}</span>
+                          </>
+                        )}
                         {m.hosts_exalt && (
                           <>
                             <br />
