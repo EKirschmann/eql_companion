@@ -4,6 +4,37 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.12.0 — 2026-07-22
+
+The overlay grows up (EQBuddy-inspired), and the companion learns what
+a "session" is:
+
+- **The overlay is now a session widget**, not just a damage meter.
+  Four sections: COMBAT (the familiar ranked bars), SESSION (kills,
+  deaths, XP% with XP/hr, coin with coin/hr, crits, hit rate), LOOT
+  (recent drops + your best observed drop-rate mobs), and PROGRESS
+  (level, an honest hours-to-ding estimate, session vs active time).
+  With Scroll Lock on: click a section header to fold it, press c for
+  a compact one-line strip, +/- to adjust opacity — position, opacity,
+  and layout persist between launches. Click-through, the singleton
+  guard, and auto-close on game exit are unchanged.
+- **Honest per-hour rates**: XP/coin/kills per hour are computed
+  against ACTIVE time (2-minute activity buckets) as well as elapsed —
+  a 30-minute AFK no longer drags your rates down. Hours-to-level says
+  "(max)" until you ding once in the session, then turns exact.
+- **Session history**: the login banner now rolls the session over —
+  the finished session's summary (kills, XP, coin, loot count, damage,
+  max DPS, active hours) is archived, counters reset, and a new "Past
+  sessions" table in the Vitals panel shows your recent sessions.
+  Empty sessions are never recorded. What the app KNOWS (pet mappings,
+  rosters, owned AAs) survives the rollover.
+- **Screen-OCR position feed rescues misread coordinates**: classic
+  letter/digit confusions (O/0, l/1, S/5, B/8) are corrected inside
+  numbers — "X: -1O2" parses as -102, and a fully-misread "Z: -SO"
+  after its label parses as -50 — frames that used to be dropped now
+  land. Zone names are never altered.
+- The main Consult now shows the same dimming veil over stale counsel
+  that the gear consult has — no more wondering whether it heard you.
 ## v1.11.0 — 2026-07-21
 
 Community-sourced upgrades (with thanks to kpxcoolx/eql-meter,

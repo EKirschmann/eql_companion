@@ -80,8 +80,28 @@ def save_config(cfg: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+_DIGIT_FIXES = str.maketrans("OolISsB", "0011558")
+
+
+def _fix_digit_confusions(text: str) -> str:
+    """Classic OCR letter/digit confusions (O->0, l/I->1, S->5, B->8)
+    fixed inside NUMBER-LIKE tokens only — a token must contain at least
+    one real digit and not sit inside a word, so zone names are never
+    mangled. Rescues partially-misread coordinates ("-1O2", "3S") that
+    previously dropped the whole frame."""
+    text = re.sub(
+        r"(?<![A-Za-z])[-+]?[0-9OolISsB.,]*[0-9][0-9OolISsB.,]*",
+        lambda m: m.group(0).translate(_DIGIT_FIXES), text)
+    # a token straight after a coordinate label is DEFINITELY a number —
+    # fix it even when every glyph was misread ("Z: -SO" -> "Z: -50")
+    return re.sub(
+        r"(?i)((?:^|[^A-Za-z])[XYZ]\s*[:;.,]\s*)([-+]?[0-9OolISsB.,]+)",
+        lambda m: m.group(1) + m.group(2).translate(_DIGIT_FIXES), text)
+
+
 def parse_loc_text(text: str) -> Optional[dict]:
     """Extract x/y/z (+ trailing zone words) from OCR output."""
+    text = _fix_digit_confusions(text)
     mx, my, mz = RE_X.search(text), RE_Y.search(text), RE_Z.search(text)
     if not (mx and my and mz):
         return None

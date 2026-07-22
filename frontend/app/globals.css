@@ -1750,3 +1750,7 @@ button.app-version:hover { color: var(--gold-bright); }
   cursor: pointer;
 }
 .enc-copy:hover { color: var(--text); }
+
+/* counsel consult gets the same obscuring veil as the gear consult */
+.adv-counsel-section { position: relative; }
+.adv-counsel-section > .adv-gear-loading { top: 0; }

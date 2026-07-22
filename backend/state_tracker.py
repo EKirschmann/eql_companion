@@ -134,6 +134,16 @@ class CharacterTracker:
         self.crits = 0
         self.coin_copper = 0  # session coin total, all sources (in copper)
         self.rune_absorbed = 0  # damage eaten by rune buffs this session
+        self.loot_count = 0     # total items looted this session
+        # finished sessions awaiting DB persistence (login banner rolls
+        # the session over; drained by the flush loop like encounters)
+        self.pending_sessions: list = []
+        # session clock (LOG time, so replays stay honest) + active-hours
+        # buckets (2-min buckets touched by any live event — AFK time
+        # cannot poison per-hour rates; pattern per EQBuddy)
+        self.session_started = None
+        self._active_buckets: set = set()
+        self._dinged = False  # leveled this session -> hours-to-level exact
         self._pending_coin: Optional[tuple] = None  # (ts, copper) pre-kill
 
     def _touch_encounter(self, ts: datetime) -> None:
@@ -326,6 +336,11 @@ class CharacterTracker:
 
         if live:
             self.last_event_at = e.ts
+            if self.session_started is None:
+                self.session_started = e.ts
+            self._active_buckets.add(int(e.ts.timestamp()) // 120)
+            if isinstance(e, ev.LevelUp):
+                self._dinged = True
             self._sweep_pending(e.ts)
             if isinstance(e, ev.DotDamage) and e.proc and (
                     e.target.lower() == "you"
@@ -456,6 +471,13 @@ class CharacterTracker:
                         (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS
                         and mob in self.encounter.get("foes", {})):
                     self._encounter_foe(e.victim, slain=True)
+            elif isinstance(e, ev.SessionStart):
+                summ = self.session_summary()
+                if (summ["kills"] or summ["xp_percent"] or summ["loot_count"]
+                        or summ["damage_dealt"] or summ["deaths"]):
+                    self.pending_sessions.append(summ)
+                    del self.pending_sessions[:-5]
+                self._reset_session(e.ts)
             elif isinstance(e, ev.Rune):
                 self.rune_absorbed += e.amount
             elif isinstance(e, ev.SelfHurt):
@@ -492,6 +514,7 @@ class CharacterTracker:
                 elif e.stored:
                     label += " (banked)"
                 self.loots.appendleft(label)
+                self.loot_count += max(e.count, 1)
                 # loot lines name the corpse: exact per-mob attribution
                 if e.source and "'s corpse" in e.source:
                     mob = _foe_key(e.source.split("'s corpse")[0].strip())
@@ -532,6 +555,85 @@ class CharacterTracker:
         value = total / max(span, 1.0)
         self.session_max_dps = max(self.session_max_dps, value)
         return round(value, 1)
+
+    def session_summary(self) -> dict:
+        """Snapshot of the CURRENT session's headline numbers — archived
+        on rollover, also served live by /api/sessions."""
+        r = self.rates() or {}
+        return {
+            "started": (self.session_started.isoformat()
+                        if self.session_started else None),
+            "ended": (self.last_event_at.isoformat()
+                      if self.last_event_at else None),
+            "elapsed_hours": r.get("elapsed_hours"),
+            "active_hours": r.get("active_hours"),
+            "kills": self.kills, "deaths": self.deaths,
+            "xp_percent": round(self.xp_percent, 2),
+            "coin_copper": self.coin_copper,
+            "crits": self.crits,
+            "loot_count": self.loot_count,
+            "damage_dealt": self.damage_dealt,
+            "damage_taken": self.damage_taken,
+            "healing_done": self.healing_done,
+            "max_dps": round(self.session_max_dps, 1),
+            "level": self.level,
+            "class_str": self.class_str,
+            "zone": self.zone,
+        }
+
+    def _reset_session(self, ts: datetime) -> None:
+        """Login banner: zero the per-session state. Knowledge (roster,
+        pet owners, owned AAs, cast evidence) survives."""
+        self.damage_dealt = self.damage_taken = 0
+        self.healing_received = self.healing_done = 0
+        self.kills = self.deaths = 0
+        self.xp_ticks = 0
+        self.xp_percent = 0.0
+        self.aa_points = self.skill_ups = 0
+        self.swings_hit = self.swings_missed = 0
+        self.crits = self.coin_copper = self.rune_absorbed = 0
+        self.loot_count = 0
+        self.loots.clear()
+        self.mob_stats = {}
+        self._last_kill = None
+        self._pending_xp = self._pending_coin = None
+        self.encounter = None
+        self.encounter_history.clear()
+        self._dmg_window.clear()
+        self.session_max_dps = 0.0
+        self.session_started = ts
+        self._active_buckets = set()
+        self._dinged = False
+
+    def rates(self) -> Optional[dict]:
+        """Per-hour session rates, per ELAPSED and per ACTIVE hour.
+        hours_to_level is EXACT when a ding happened this session (the
+        XP box counts from 0 after it), else an upper bound (we cannot
+        see the level progress that predates the session)."""
+        if not self.session_started or not self.last_event_at:
+            return None
+        elapsed_h = max((self.last_event_at - self.session_started)
+                        .total_seconds() / 3600.0, 1 / 60.0)
+        active_h = min(len(self._active_buckets) * 120 / 3600.0, elapsed_h)
+        active_h = max(active_h, 1 / 60.0)
+
+        def pair(v, nd=1):
+            return {"hr": round(v / elapsed_h, nd),
+                    "active_hr": round(v / active_h, nd)}
+
+        out = {
+            "elapsed_hours": round(elapsed_h, 2),
+            "active_hours": round(active_h, 2),
+            "xp": pair(self.xp_percent, 2),
+            "coin": pair(self.coin_copper, 0),
+            "kills": pair(self.kills),
+        }
+        xp_active = out["xp"]["active_hr"]
+        if xp_active > 0:
+            remain = max(0.0, 100.0 - self.xp_percent)
+            out["hours_to_level"] = round(remain / xp_active, 1)
+            out["hours_to_level_exact"] = self._dinged
+        return out
 
     def in_combat(self) -> bool:
         if not self._dmg_window:
@@ -833,6 +935,7 @@ class CharacterTracker:
                 ({"name": k, **v} for k, v in self.mob_stats.items()),
                 key=lambda s: s["kills"], reverse=True)[:10],
             "zone": self.zone,
+            "rates": self.rates(),
             "in_combat": self.in_combat(),
             "dps": self.dps(),
             "session_max_dps": round(self.session_max_dps, 1),

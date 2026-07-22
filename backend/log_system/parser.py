@@ -48,6 +48,7 @@ RE_CHAT = re.compile(
     r"[^,]{0,60}, '")
 
 RE_ZONE = re.compile(r"^You have entered (.+?)\.$")
+RE_SESSION_START = re.compile(r"^Welcome to EverQuest Legends!")
 RE_OUT_SPELL = re.compile(r"^You hit (.+?) for (\d+) points? of ([-\w\s]+?) damage by (.+?)[.!]")
 RE_IN_SPELL = re.compile(r"^(.+?) hit you for (\d+) points? of ([-\w\s]+?) damage by (.+?)[.!]")
 # plain non-melee nuke (no "by <spell>" tail)
@@ -233,6 +234,8 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
             tags.append(t.group(2))
     crit = any("Critical" in t or t in CRIT_TAGS for t in tags)
 
+    if RE_SESSION_START.match(body):
+        return ev.SessionStart(**base)
     if z := RE_ZONE.match(body):
         zone = z.group(1)
         # Skip "You have entered an area where levitation..." style notices

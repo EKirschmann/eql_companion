@@ -330,6 +330,24 @@ export interface PetGear {
   where?: string;
 }
 
+export interface SessionSummary {
+  started: string | null;
+  ended: string | null;
+  elapsed_hours: number | null;
+  active_hours: number | null;
+  kills: number;
+  deaths: number;
+  xp_percent: number;
+  coin_copper: number;
+  crits: number;
+  loot_count: number;
+  damage_dealt: number;
+  max_dps: number;
+  level: number | null;
+  class_str: string | null;
+  zone: string | null;
+}
+
 export interface GearMerge {
   item: string;
   /** e.g. ["+6 (bank)", "+0 (bags)"] — highest rank first. */

@@ -1,8 +1,8 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
-import { apiSend } from "@/lib/api";
-import type { Snapshot } from "@/lib/types";
+import { apiGet, apiSend } from "@/lib/api";
+import type { SessionSummary, Snapshot } from "@/lib/types";
 
 const PLAYSTYLES = [
   "solo_dps", "group_dps", "tank", "healer", "support", "pet_focused", "balanced",
@@ -31,6 +31,13 @@ export const CharacterPanel = memo(function CharacterPanel({
 }) {
   const [hpDraft, setHpDraft] = useState("");
   const [manaDraft, setManaDraft] = useState("");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  useEffect(() => {
+    if (!snap?.name) return;
+    apiGet<{ history: SessionSummary[] }>("/api/sessions")
+      .then((d) => setSessions(d.history ?? []))
+      .catch(() => setSessions([]));
+  }, [snap?.name]);
   useEffect(() => {
     setHpDraft(snap?.max_hp != null ? String(snap.max_hp) : "");
   }, [snap?.max_hp]);
@@ -220,6 +227,41 @@ export const CharacterPanel = memo(function CharacterPanel({
                 <li key={`${item}-${i}`}>{item}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {sessions.length > 0 && (
+          <div className="loot-list hunt-list">
+            <h3>Past sessions</h3>
+            <table className="hunt-table">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col" title="Active hours (2-min activity buckets)">Hrs</th>
+                  <th scope="col">Kills</th>
+                  <th scope="col">XP</th>
+                  <th scope="col">Coin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.slice(0, 8).map((sess, i) => (
+                  <tr key={sess.started ?? i}>
+                    <td className="hunt-name">
+                      {sess.started
+                        ? new Date(sess.started).toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                          })
+                        : "?"}
+                    </td>
+                    <td>{sess.active_hours ?? "?"}</td>
+                    <td>{sess.kills}</td>
+                    <td>{sess.xp_percent > 0 ? `${sess.xp_percent}%` : "—"}</td>
+                    <td>{fmtCoin(sess.coin_copper ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

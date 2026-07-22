@@ -68,7 +68,7 @@ backend/
 ├── map_system.py        # Atlas charts: map-file parsing + zone travel graph
 ├── geometry_system.py   # .s3d/.wld mesh extraction (2D floors/walls + 3D)
 ├── ocr_system.py        # screen OCR position feed (RapidOCR; Windows)
-├── overlay.py           # always-on-top combat strip (tkinter; Windows)
+├── overlay.py           # sectioned session overlay (tkinter; Windows)
 ├── log_system/          # events.py (pydantic), parser.py (ALL regex), watcher.py
 └── agent/               # advisor.py (LLM counsel + gates + builtin mode),
                          # graph.py (chat), prompts.py, tools.py, state.py
@@ -151,6 +151,20 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
   encounter), faction caps, random rolls, raid /who rows (Group: N is
   not a race; AFK prefix tolerated), and possessive pet swings
   ("Kenkyo`s warder bites" rewrites to the "<Owner> pet" convention).
+
+## Sessions (rollover + history)
+
+"Welcome to EverQuest Legends!" (login banner) is the ONE session
+boundary: a live banner archives the current session summary (only if
+meaningful — kills/xp/loot/damage/deaths) into tracker.pending_sessions
+(drained to the DB as event_type="session" rows by the flush loop) and
+ZEROES per-session state; knowledge (roster, pet owners, owned AAs,
+cast evidence) survives. `tracker.rates()` supplies per-hour numbers
+per ELAPSED and per ACTIVE hour (2-min activity buckets, log-time
+clocks — AFK never poisons rates; pattern per EQBuddy) plus an
+hours-to-level estimate (exact only after a same-session ding).
+`GET /api/sessions` = live summary + history; the Vitals panel shows a
+"Past sessions" table.
 
 ## Session persistence (survives restarts)
 
@@ -435,10 +449,14 @@ model selection itself is runtime-switchable in the UI.
   The Companion chat tab was removed.
 - The Encounter panel shows per-ability hit counts (×), a defense line,
   healer-attributed heal rows, and a separate Pet section when a mapped
-  pet contributes. The overlay (backend/overlay.py) is a Details-style
-  meter: ranked class-colored bars to raid size, Damage|DPS modes,
-  this-fight|last-5 segments, named-mutex singleton, self-closes when
-  eqgame.exe exits.
+  pet contributes. The overlay (backend/overlay.py) is an EQBuddy-style
+  sectioned widget: COMBAT (ranked class-colored bars, Damage|DPS,
+  this-fight|last-5), SESSION (kills/xp+rate/coin+rate/crits), LOOT
+  (recent + best drop-rate mobs), PROGRESS (hours-to-ding) — sections
+  collapse by clicking their header (Scroll Lock ON), c toggles a
+  compact one-line strip, +/- adjusts opacity; layout/position persist
+  to data/overlay_ui.json. Named-mutex singleton, click-through when
+  Scroll Lock is OFF, self-closes when eqgame.exe exits.
 
 ## Testing
 

@@ -414,6 +414,30 @@ def _drain_roster_updates() -> None:
         logger.warning("DB queue full — roster persist skipped")
 
 
+def _drain_finished_sessions() -> None:
+    """Queue rolled-over sessions (event_type='session'; the login
+    banner is the boundary). Meaningless sessions never reach here."""
+    if not tracker or not tracker.pending_sessions:
+        return
+    views = list(tracker.pending_sessions)
+    tracker.pending_sessions.clear()
+    if not _character_id:
+        return
+    for view in views:
+        try:
+            _db_queue.put_nowait({
+                "character_id": _character_id, "event_type": "session",
+                "payload": view,
+                "ts": datetime.fromisoformat(view["started"])
+                if view.get("started") else datetime.now(),
+                "zone": view.get("zone"), "level": view.get("level"),
+                "class_str": view.get("class_str"),
+                "aa_available": tracker.aa_available,
+            })
+        except asyncio.QueueFull:
+            logger.warning("DB queue full — dropping session record")
+
+
 def _drain_finished_encounters() -> None:
     """Queue archived pulls for persistence (event_type='encounter')."""
     if not tracker or not tracker.pending_encounters:
@@ -442,6 +466,7 @@ async def event_flush_loop() -> None:
         try:
             _drain_roster_updates()
             _drain_finished_encounters()
+            _drain_finished_sessions()
             await _flush_events()
         except Exception:
             logger.exception("Event flush failed")
@@ -524,7 +549,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.11.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.12.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -1054,6 +1079,21 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()
     return advice
+
+
+@app.get("/api/sessions")
+async def get_sessions(limit: int = 12, db: Session = Depends(get_db)):
+    """Past play sessions (login banner = boundary) + the live one."""
+    current = (tracker.session_summary()
+               if tracker and tracker.session_started else None)
+    rows = []
+    if _character_id:
+        q = (db.query(LogEventRow)
+             .filter(LogEventRow.character_id == _character_id,
+                     LogEventRow.event_type == "session")
+             .order_by(LogEventRow.ts.desc()).limit(limit).all())
+        rows = [r.payload for r in q]
+    return {"current": current, "history": rows}
 
 
 @app.get("/api/loot-filter")

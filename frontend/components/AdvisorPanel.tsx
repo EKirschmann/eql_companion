@@ -474,6 +474,13 @@ export const AdvisorPanel = memo(function AdvisorPanel({
         )}
         {advice && (
           <>
+            <div className="adv-counsel-section">
+            {loading && (
+              <div className="adv-gear-loading" role="status" aria-live="polite">
+                <span className="adv-gear-spin" aria-hidden />
+                Consulting — weighing the loadout against the wiki…
+              </div>
+            )}
             {advice.stale && (
               <div className="adv-stale">
                 Saved counsel from {advice.generated?.replace("T", " ") ?? "earlier"} — your
@@ -675,6 +682,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                 />
               </div>
             )}
+            </div>
 
             <div className="adv-section adv-gear-section">
               <h3 className="adv-gear-head">

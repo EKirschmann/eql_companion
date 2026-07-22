@@ -1,17 +1,21 @@
-"""Details-style damage meter overlay (always-on-top, click-through).
+"""Sectioned session overlay (always-on-top, click-through).
 
-Ranked, class-colored bars over the game — like the WoW Details! addon:
-each contributor gets a bar proportional to the leader, with damage done,
-DPS, and share of the group total. Two modes (Damage | DPS) and two
-segments (this fight | last 5 fights).
+EQBuddy-style widget on our StoneGlass meter base: collapsible sections
+- COMBAT   ranked class-colored damage bars (Damage|DPS, fight|last-5)
+- SESSION  kills/deaths, XP + XP/hr, coin + coin/hr, crits/hit rate
+- LOOT     recent drops + best observed drop-rate mobs
+- PROGRESS level, hours-to-ding estimate, session/active clock
+plus a COMPACT mode (header strip only) and adjustable opacity.
 
-While Scroll Lock is OFF the window is CLICK-THROUGH — every click lands in
-the game. Scroll Lock ON makes it movable and interactive: click the title
-to switch mode, the segment label to switch segment, drag to move,
-double-click to close. Passive: reads the HTTP API only.
+While Scroll Lock is OFF the window is CLICK-THROUGH — every click lands
+in the game. Scroll Lock ON makes it interactive: drag to move, click
+the title to switch Damage|DPS, the right header side to switch
+fight|last-5, a section header to collapse/expand it, keys c=compact
++/-=opacity, double-click to close. Layout/position/opacity persist to
+data/overlay_ui.json. Passive: reads the HTTP API only.
 
-The overlay is a singleton (a second launch exits immediately) and closes
-itself when the game exits — no orphan meters after you camp for the night.
+The overlay is a singleton (a second launch exits immediately) and
+closes itself when the game exits.
 
 Run: python -m backend.overlay   (or the Overlay button in the web header)
 """
@@ -22,9 +26,11 @@ import threading
 import time
 import tkinter as tk
 import urllib.request
+from pathlib import Path
 
 API_CHAR = "http://localhost:8000/api/character"
 API_ENCS = "http://localhost:8000/api/encounters?limit=5"
+STATE_FILE = Path("data") / "overlay_ui.json"
 
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x00080000
@@ -33,6 +39,7 @@ VK_SCROLL = 0x91
 
 BG = "#12151a"
 HEADER_BG = "#1b1f26"
+SEC_BG = "#171b21"
 GOLD = "#c8aa6e"
 BRIGHT = "#e7cd92"
 INK = "#e6dEca"
@@ -42,8 +49,12 @@ RED = "#d4574a"
 
 W = 300
 HEADER_H = 22
+SEC_H = 15
 ROW_H = 17
+TROW_H = 14
 HINT_H = 13
+
+SECTIONS = ("combat", "session", "loot", "progress")
 
 # EQ class colors (first abbrev of the trio decides the bar color)
 CLASS_COLORS = {
@@ -66,6 +77,15 @@ def _class_color(classes, name):
 def _fmt(v):
     v = v or 0
     return f"{v / 1000:.1f}k" if v >= 10000 else f"{v:,.0f}"
+
+
+def _fmt_coin(copper):
+    """3267 copper -> '3p2g' (two largest denominations)."""
+    c = int(copper or 0)
+    parts = [(c // 1000, "p"), ((c % 1000) // 100, "g"),
+             ((c % 100) // 10, "s"), (c % 10, "c")]
+    out = [f"{n}{u}" for n, u in parts if n > 0][:2]
+    return "".join(out) or "0c"
 
 
 def _fight_rows(enc):
@@ -106,21 +126,98 @@ def compute_rows(snap, history, segment):
     return rows[:8], label
 
 
+def session_rows(snap):
+    """SESSION section: [(left, right, color)]."""
+    s = (snap or {}).get("session") or {}
+    r = (snap or {}).get("rates") or {}
+
+    def act(key):
+        return (r.get(key) or {}).get("active_hr", 0)
+
+    return [
+        (f"kills {s.get('kills', 0)} · deaths {s.get('deaths', 0)}",
+         f"{act('kills'):g}/hr", INK),
+        (f"xp +{s.get('xp_percent', 0):g}%", f"{act('xp'):g}%/hr", INK),
+        (f"coin {_fmt_coin(s.get('coin_copper', 0))}",
+         f"{_fmt_coin(act('coin'))}/hr", INK),
+        (f"crits {s.get('crits', 0)} · hit {s.get('hit_rate', 0):g}%",
+         f"rune {_fmt(s.get('rune_absorbed', 0))}", MUTED),
+    ]
+
+
+def loot_rows(snap):
+    """LOOT section: recent drops + best observed drop-rate mobs."""
+    s = (snap or {}).get("session") or {}
+    rows = [((" " + item)[:42], "", INK)
+            for item in (s.get("loots") or [])[:4]]
+    best = []
+    for m in (snap or {}).get("mob_stats") or []:
+        kills, drops = m.get("kills") or 0, m.get("loot_drops") or 0
+        if kills > 0 and drops > 0:
+            best.append((m.get("name") or "?", round(100 * drops / kills)))
+    best.sort(key=lambda x: -x[1])
+    for name, pct in best[:2]:
+        rows.append((name[:28], f"{pct}% drops", MUTED))
+    return rows or [("no loot yet", "", MUTED)]
+
+
+def progress_rows(snap):
+    """PROGRESS section: level, ding estimate, session clocks."""
+    r = (snap or {}).get("rates") or {}
+    lvl = (snap or {}).get("level")
+    htl = r.get("hours_to_level")
+    right = ""
+    if htl:
+        right = f"ding in ~{htl:g}h"
+        if not r.get("hours_to_level_exact"):
+            right += " (max)"
+    return [
+        (f"level {lvl if lvl is not None else '?'}", right, INK),
+        (f"session {r.get('elapsed_hours', 0):g}h · "
+         f"active {r.get('active_hours', 0):g}h", "", MUTED),
+    ]
+
+
+def section_summary(key, snap, history, segment):
+    """One-liner shown on a COLLAPSED section header."""
+    if key == "combat":
+        return f"{(snap or {}).get('dps', 0):g} dps"
+    if key == "session":
+        s = (snap or {}).get("session") or {}
+        r = (snap or {}).get("rates") or {}
+        return (f"{s.get('kills', 0)}k · "
+                f"{(r.get('xp') or {}).get('active_hr', 0):g}%/hr")
+    if key == "loot":
+        loots = ((snap or {}).get("session") or {}).get("loots") or []
+        return (loots[0][:22] if loots else "—")
+    if key == "progress":
+        r = (snap or {}).get("rates") or {}
+        htl = r.get("hours_to_level")
+        return f"~{htl:g}h to ding" if htl else "—"
+    return ""
+
 class OverlayMeter:
     def __init__(self) -> None:
         self.snap = None
         self.history = []
-        self.mode = "damage"        # damage | dps
-        self.segment = "current"    # current | last5
+        st = self._load_state()
+        self.mode = st.get("mode", "damage")          # damage | dps
+        self.segment = st.get("segment", "current")   # current | last5
+        self.compact = bool(st.get("compact", False))
+        self.alpha = min(1.0, max(0.35, float(st.get("alpha", 0.90))))
+        self.collapsed = {k: bool(st.get("collapsed", {}).get(k, False))
+                          for k in SECTIONS}
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.90)
+        self.root.attributes("-alpha", self.alpha)
         self.root.configure(bg=BG)
-        self.root.geometry(f"{W}x{HEADER_H + ROW_H + HINT_H}+60+140")
+        x, y = int(st.get("x", 60)), int(st.get("y", 140))
+        self.root.geometry(f"{W}x{HEADER_H + ROW_H + HINT_H}+{x}+{y}")
         self._drag = None
         self._moved = False
         self._transparent = None
+        self._sec_zones = []  # [(y0, y1, key)] rebuilt every render
 
         self.canvas = tk.Canvas(self.root, width=W, bg=BG,
                                 highlightthickness=0, bd=0)
@@ -129,17 +226,41 @@ class OverlayMeter:
         self.canvas.bind("<B1-Motion>", self._motion)
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Double-Button-1>", lambda _e: self.root.destroy())
+        self.root.bind("<KeyPress>", self._key)
 
         threading.Thread(target=self._poll_char, daemon=True).start()
         threading.Thread(target=self._poll_encounters, daemon=True).start()
         threading.Thread(target=self._watch_game, daemon=True).start()
         self.root.after(300, self._render)
 
+    # ---- persisted layout state -------------------------------------------
+    def _load_state(self) -> dict:
+        try:
+            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_state(self) -> None:
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps({
+                "x": self.root.winfo_x(), "y": self.root.winfo_y(),
+                "alpha": round(self.alpha, 2), "compact": self.compact,
+                "collapsed": self.collapsed,
+                "mode": self.mode, "segment": self.segment,
+            }), encoding="utf-8")
+        except Exception:
+            pass
+
     # ---- interaction (only reachable while Scroll Lock is ON) -------------
     def _press(self, e) -> None:
         self._drag = (e.x_root - self.root.winfo_x(),
                       e.y_root - self.root.winfo_y())
         self._moved = False
+        try:
+            self.root.focus_force()  # so c / +/- keys land here
+        except Exception:
+            pass
 
     def _motion(self, e) -> None:
         if self._drag:
@@ -148,12 +269,34 @@ class OverlayMeter:
                 f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
 
     def _release(self, e) -> None:
-        if not self._moved and e.y <= HEADER_H:
-            if e.x < W // 2:
-                self.mode = "dps" if self.mode == "damage" else "damage"
+        if not self._moved:
+            if e.y <= HEADER_H:
+                if e.x < W // 2:
+                    self.mode = "dps" if self.mode == "damage" else "damage"
+                else:
+                    self.segment = ("last5" if self.segment == "current"
+                                    else "current")
             else:
-                self.segment = "last5" if self.segment == "current" else "current"
+                for y0, y1, key in self._sec_zones:
+                    if y0 <= e.y <= y1:
+                        self.collapsed[key] = not self.collapsed[key]
+                        break
         self._drag = None
+        self._save_state()
+
+    def _key(self, e) -> None:
+        ch = (e.char or "").lower()
+        if ch == "c":
+            self.compact = not self.compact
+        elif ch in ("+", "="):
+            self.alpha = min(1.0, self.alpha + 0.05)
+            self.root.attributes("-alpha", self.alpha)
+        elif ch in ("-", "_"):
+            self.alpha = max(0.35, self.alpha - 0.05)
+            self.root.attributes("-alpha", self.alpha)
+        else:
+            return
+        self._save_state()
 
     def _set_click_through(self, enable: bool) -> None:
         if enable == self._transparent:
@@ -214,63 +357,119 @@ class OverlayMeter:
             time.sleep(5)
 
     # ---- paint ---------------------------------------------------------
+    def _sec_header(self, c, y, key, title, extra="") -> int:
+        arrow = "v" if not self.collapsed[key] else ">"
+        c.create_rectangle(0, y, W, y + SEC_H, fill=SEC_BG, width=0)
+        c.create_text(6, y + SEC_H // 2, anchor="w", fill=GOLD,
+                      font=("Consolas", 7, "bold"),
+                      text=f"{arrow} {title}")
+        summary = extra if not self.collapsed[key] else section_summary(
+            key, self.snap, self.history, self.segment)
+        if summary:
+            c.create_text(W - 6, y + SEC_H // 2, anchor="e", fill=MUTED,
+                          font=("Consolas", 7), text=summary[:34])
+        self._sec_zones.append((y, y + SEC_H, key))
+        return y + SEC_H
+
+    def _text_rows(self, c, y, rows) -> int:
+        for left, right, color in rows:
+            c.create_text(8, y + TROW_H // 2, anchor="w", fill=color,
+                          font=("Consolas", 8), text=left)
+            if right:
+                c.create_text(W - 6, y + TROW_H // 2, anchor="e", fill=color,
+                              font=("Consolas", 8), text=right)
+            y += TROW_H
+        return y
+
     def _render(self) -> None:
         interactive = bool(ctypes.windll.user32.GetKeyState(VK_SCROLL) & 1)
         self._set_click_through(not interactive)
         c = self.canvas
         c.delete("all")
+        self._sec_zones = []
 
         rows, label = compute_rows(self.snap, self.history, self.segment)
-        n = max(1, len(rows))
-        height = HEADER_H + n * ROW_H + HINT_H
-        self.root.geometry(f"{W}x{height}")
-        c.configure(height=height)
-
-        # header
-        c.create_rectangle(0, 0, W, HEADER_H, fill=HEADER_BG, width=0)
-        mode_label = "Damage" if self.mode == "damage" else "DPS"
-        live = self.snap and self.snap.get("in_combat")
-        c.create_text(8, HEADER_H // 2, anchor="w", fill=GOLD,
-                      font=("Consolas", 9, "bold"),
-                      text=f"{mode_label} · {label}")
+        s = (self.snap or {}).get("session") or {}
+        r = (self.snap or {}).get("rates") or {}
         my_dps = (self.snap or {}).get("dps", 0)
-        c.create_text(W - 8, HEADER_H // 2, anchor="e",
-                      fill=HEAL if live else MUTED,
-                      font=("Consolas", 9, "bold"), text=f"{my_dps:g}")
+        live = self.snap and self.snap.get("in_combat")
+
+        # ---- header (always visible) ----
+        y = HEADER_H
+        c.create_rectangle(0, 0, W, HEADER_H, fill=HEADER_BG, width=0)
+        if self.compact:
+            xp_act = (r.get("xp") or {}).get("active_hr", 0)
+            coin_act = (r.get("coin") or {}).get("active_hr", 0)
+            header = (f"{my_dps:g}dps · {s.get('kills', 0)}k · "
+                      f"{xp_act:g}%/hr · {_fmt_coin(coin_act)}/hr")
+            c.create_text(6, HEADER_H // 2, anchor="w", fill=GOLD,
+                          font=("Consolas", 9, "bold"), text=f"EQL {header}")
+        else:
+            mode_label = "Damage" if self.mode == "damage" else "DPS"
+            c.create_text(8, HEADER_H // 2, anchor="w", fill=GOLD,
+                          font=("Consolas", 9, "bold"),
+                          text=f"{mode_label} · {label}"[:34])
+            c.create_text(W - 8, HEADER_H // 2, anchor="e",
+                          fill=HEAL if live else MUTED,
+                          font=("Consolas", 9, "bold"), text=f"{my_dps:g}")
 
         if not self.snap:
-            c.create_text(8, HEADER_H + ROW_H // 2, anchor="w", fill=RED,
-                          font=("Consolas", 9), text="companion offline (:8000)")
-        elif not rows:
-            c.create_text(8, HEADER_H + ROW_H // 2, anchor="w", fill=MUTED,
-                          font=("Consolas", 9), text="waiting for combat…")
-
-        total = sum(r[2] for r in rows) or 1
-        top = rows[0][2] if rows else 1
-        for i, (name, classes, dmg, dps) in enumerate(rows):
-            y0 = HEADER_H + i * ROW_H
-            frac = (dmg / top) if top else 0
-            color = _class_color(classes, name)
-            c.create_rectangle(0, y0 + 1, max(2, int(W * frac)), y0 + ROW_H - 1,
-                               fill=color, width=0, stipple="gray50")
-            share = 100 * dmg / total
-            val = _fmt(dmg) if self.mode == "damage" else f"{dps:g}"
-            fg = BRIGHT if name == "You" else INK
-            c.create_text(6, y0 + ROW_H // 2, anchor="w", fill=fg,
+            c.create_text(8, y + TROW_H // 2, anchor="w", fill=RED,
                           font=("Consolas", 9),
-                          text=f"{i + 1}. {name[:15]}")
-            c.create_text(W - 6, y0 + ROW_H // 2, anchor="e", fill=fg,
-                          font=("Consolas", 9),
-                          text=f"{val} ({share:.0f}%)")
+                          text="companion offline (:8000)")
+            y += TROW_H
+        elif not self.compact:
+            # ---- COMBAT ----
+            y = self._sec_header(c, y, "combat", "COMBAT")
+            if not self.collapsed["combat"]:
+                if not rows:
+                    c.create_text(8, y + TROW_H // 2, anchor="w", fill=MUTED,
+                                  font=("Consolas", 9),
+                                  text="waiting for combat…")
+                    y += TROW_H
+                total = sum(x[2] for x in rows) or 1
+                top = rows[0][2] if rows else 1
+                for i, (name, classes, dmg, dps) in enumerate(rows):
+                    y0 = y + i * ROW_H
+                    frac = (dmg / top) if top else 0
+                    color = _class_color(classes, name)
+                    c.create_rectangle(0, y0 + 1, max(2, int(W * frac)),
+                                       y0 + ROW_H - 1, fill=color, width=0,
+                                       stipple="gray50")
+                    share = 100 * dmg / total
+                    val = _fmt(dmg) if self.mode == "damage" else f"{dps:g}"
+                    fg = BRIGHT if name == "You" else INK
+                    c.create_text(6, y0 + ROW_H // 2, anchor="w", fill=fg,
+                                  font=("Consolas", 9),
+                                  text=f"{i + 1}. {name[:15]}")
+                    c.create_text(W - 6, y0 + ROW_H // 2, anchor="e", fill=fg,
+                                  font=("Consolas", 9),
+                                  text=f"{val} ({share:.0f}%)")
+                y += len(rows) * ROW_H
+            # ---- SESSION / LOOT / PROGRESS ----
+            y = self._sec_header(c, y, "session", "SESSION")
+            if not self.collapsed["session"]:
+                y = self._text_rows(c, y, session_rows(self.snap))
+            y = self._sec_header(c, y, "loot", "LOOT")
+            if not self.collapsed["loot"]:
+                y = self._text_rows(c, y, loot_rows(self.snap))
+            y = self._sec_header(c, y, "progress", "PROGRESS")
+            if not self.collapsed["progress"]:
+                y = self._text_rows(c, y, progress_rows(self.snap))
 
-        hint_y = HEADER_H + n * ROW_H + HINT_H // 2
+        hint_y = y + HINT_H // 2
         if interactive:
-            c.create_text(6, hint_y, anchor="w", fill=GOLD, font=("Consolas", 7),
-                          text="MOVABLE · click title=mode · right side=segment "
-                               "· dbl-click closes · ScrLk OFF=click-through")
+            c.create_text(6, hint_y, anchor="w", fill=GOLD,
+                          font=("Consolas", 7),
+                          text="MOVABLE · title=mode/segment · section=fold "
+                               "· c=compact · ±=opacity · dbl-click closes")
         else:
-            c.create_text(6, hint_y, anchor="w", fill=MUTED, font=("Consolas", 7),
-                          text="click-through · Scroll Lock ON to move/switch")
+            c.create_text(6, hint_y, anchor="w", fill=MUTED,
+                          font=("Consolas", 7),
+                          text="click-through · Scroll Lock ON to interact")
+        height = y + HINT_H
+        self.root.geometry(f"{W}x{height}")
+        c.configure(height=height)
         self.root.after(500, self._render)
 
 
