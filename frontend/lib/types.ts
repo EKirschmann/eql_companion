@@ -90,6 +90,8 @@ export interface Encounter {
   total_damage: number;
   damage_taken: number;
   dps: number;
+  /** Best 3-second burst window inside the fight. */
+  peak_dps?: number;
   abilities: EncounterAbility[];
 }
 
@@ -339,6 +341,8 @@ export interface GearMerge {
   worn_pair?: boolean;
   /** Quantified two-worn vs merged-one stat comparison. */
   compare?: string | null;
+  /** Loot-filter action for this item (store/loot/merge/sell). */
+  filter_action?: string | null;
 }
 
 export interface GearAdvice {

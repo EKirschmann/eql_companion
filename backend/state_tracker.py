@@ -133,6 +133,7 @@ class CharacterTracker:
         self.spell_casts: set = set()
         self.crits = 0
         self.coin_copper = 0  # session coin total, all sources (in copper)
+        self.rune_absorbed = 0  # damage eaten by rune buffs this session
         self._pending_coin: Optional[tuple] = None  # (ts, copper) pre-kill
 
     def _touch_encounter(self, ts: datetime) -> None:
@@ -224,6 +225,9 @@ class CharacterTracker:
         if crit:
             ab["crits"] = ab.get("crits", 0) + 1
         enc["total_out"] += damage
+        sec = int(ts.timestamp())
+        tl = enc.setdefault("secs", {})
+        tl[sec] = tl.get(sec, 0) + damage
         if target:
             enc["target"] = target
             self._encounter_foe(target, dealt=damage)
@@ -452,6 +456,12 @@ class CharacterTracker:
                         (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS
                         and mob in self.encounter.get("foes", {})):
                     self._encounter_foe(e.victim, slain=True)
+            elif isinstance(e, ev.Rune):
+                self.rune_absorbed += e.amount
+            elif isinstance(e, ev.SelfHurt):
+                # cannibalize / DS self-ticks: damage taken, NEVER dealt,
+                # and never opens an encounter
+                self.damage_taken += e.damage
             elif isinstance(e, ev.MyDeath):
                 self.deaths += 1
                 self.last_death = self._death_recap(e)
@@ -530,6 +540,12 @@ class CharacterTracker:
 
     def _encounter_view(self, enc: dict, live: bool) -> dict:
         duration = max((enc["last"] - enc["started"]).total_seconds(), 1.0)
+        # best 3-second burst window (keys re-int'd: JSON restores strings)
+        secs = {int(k): v for k, v in (enc.get("secs") or {}).items()}
+        peak = 0
+        for k in secs:
+            peak = max(peak, secs.get(k, 0) + secs.get(k + 1, 0)
+                       + secs.get(k + 2, 0))
         abilities = [
             {
                 "name": name,
@@ -596,6 +612,7 @@ class CharacterTracker:
             "defense": dict(enc.get("defense") or {}),
             "resists": dict(enc.get("resists") or {}),
             "dps": round(enc["total_out"] / duration, 1),
+            "peak_dps": round(peak / 3.0, 1),
             "abilities": abilities,
         }
 
@@ -837,6 +854,7 @@ class CharacterTracker:
                 "skill_ups": self.skill_ups,
                 "crits": self.crits,
                 "coin_copper": self.coin_copper,
+                "rune_absorbed": self.rune_absorbed,
                 "hit_rate": round(
                     100 * self.swings_hit / max(self.swings_hit + self.swings_missed, 1), 1),
                 "loots": list(self.loots),

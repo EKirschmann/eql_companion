@@ -70,8 +70,17 @@ function classify(r: LedgerRow): {
     case "faction":
       return {
         kind: "dim",
-        text: `Faction: ${r.faction}`,
-        value: `${Number(r.delta) > 0 ? "+" : ""}${r.delta}`,
+        text: r.capped ? `Faction maxed (${r.capped}): ${r.faction}` : `Faction: ${r.faction}`,
+        value: r.capped ? undefined : `${Number(r.delta) > 0 ? "+" : ""}${r.delta}`,
+      };
+    case "rune":
+      return { kind: "heal", text: "Rune absorbs", value: `${r.amount}` };
+    case "self_hurt":
+      return { kind: "in", text: "You hurt yourself", value: `−${r.damage}` };
+    case "roll":
+      return {
+        kind: "milestone",
+        text: r.who ? `${r.who} rolls ${r.value} (${r.lo}-${r.hi})` : `Random roll ${r.lo}-${r.hi}`,
       };
     case "merge":
       return { kind: "milestone", text: `Merged → ${r.item}` };

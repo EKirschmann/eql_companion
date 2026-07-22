@@ -524,7 +524,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.10.1"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.11.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -1036,11 +1036,15 @@ async def get_gear(refresh: bool = False, cached: bool = False):
         if _gear_cache is not None:
             return {**_gear_cache, "stale": True}
         return {"cached": False}
+    from backend import loot_filter
+    lf = loot_filter.load(tracker.name, tracker.server)
     ctx = {"class_str": tracker.class_str, "level": tracker.level,
            "race": tracker.race, "playstyle": tracker.playstyle,
            "worn": (inv or {}).get("worn"),
            "inventory_items": (inv or {}).get("items"),
            "exaltations": (inv or {}).get("exaltations"),
+           "item_sockets": (inv or {}).get("item_sockets"),
+           "loot_filter": lf["actions"] if lf else None,
            "pet_slots": tracker.pet_slots,
            "pet_classes": tracker.pet_classes,
            "pet_inventory": dict(tracker.pet_inventory),
@@ -1050,6 +1054,17 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()
     return advice
+
+
+@app.get("/api/loot-filter")
+async def get_loot_filter():
+    """The character's loot filter (LF_*.ini), read passively."""
+    from backend import loot_filter
+    lf = loot_filter.load(tracker.name, tracker.server)
+    if not lf:
+        return {"available": False}
+    return {"available": True, "file": lf["file"],
+            "counts": lf["counts"], "items": len(lf["actions"])}
 
 
 @app.get("/api/item-acquisition")
@@ -1210,16 +1225,29 @@ async def ocr_launch_overlay():
 
 
 @app.get("/api/route")
-async def get_route(to: str, frm: Optional[str] = None):
-    """Shortest zone-hop route. `frm` defaults to the current zone."""
+async def get_route(to: str, frm: Optional[str] = None,
+                    ports: Optional[str] = None):
+    """Shortest route: walk edges + naval-translocator dock cliques +
+    druid/wizard port RITUALS (jump from anywhere). Port availability
+    defaults to the trio's classes; override with ?ports=druid,wizard
+    (rituals persist once leveled, even outside the current trio).
+    `frm` defaults to the current zone."""
+    from backend.map_system import find_route_ex
     start = frm or tracker.zone
     if not start:
         return {"path": None, "reason": "Current zone unknown"}
-    path = find_route(start, to)
-    if path is None:
+    if ports is not None:
+        port_classes = tuple(p.strip().lower() for p in ports.split(",")
+                             if p.strip())
+    else:
+        port_classes = tuple(
+            c.strip().lower() for c in (tracker.class_str or "").split("/")
+            if c.strip().lower() in ("druid", "wizard"))
+    steps = find_route_ex(start, to, port_classes)
+    if steps is None:
         return {"path": None,
                 "reason": f"No known route from {normalize_zone(start)} to {normalize_zone(to)}"}
-    return {"path": path}
+    return {"path": [s["zone"] for s in steps], "steps": steps}
 
 
 @app.get("/api/chat/history")

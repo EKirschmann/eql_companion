@@ -142,8 +142,15 @@ All styling is CSS custom properties in `app/globals.css` — **no Tailwind**.
   `parser.py` → (optional) count in `state_tracker.apply()` → (optional) add
   to `PERSISTED_EVENTS` in main.py → `case` in WarLedger `classify()`.
   Unknown types render as dim raw rows, so nothing breaks if you skip the UI.
-- **Parser coverage test** (run after any EQL patch): parse your full log and
-  count event types; a category dropping to zero means the format changed.
+- **Parser coverage test** (run after any EQL patch):
+  `python scripts/parser_coverage.py` — runs the vendored real-log
+  fixture (tests/fixtures/, from kpxcoolx/eql-meter, MIT) AND your
+  newest live log; a category dropping to zero means a format broke.
+  Also parsed: rune absorption, the "magical skin absorbs" defense verb
+  (both directions), self-hurt lines (damage TAKEN, never dealt, no
+  encounter), faction caps, random rolls, raid /who rows (Group: N is
+  not a race; AFK prefix tolerated), and possessive pet swings
+  ("Kenkyo`s warder bites" rewrites to the "<Owner> pet" convention).
 
 ## Session persistence (survives restarts)
 
@@ -197,6 +204,12 @@ throttled `state` pushes. REST highlights (see main.py for all):
 - Zone names: `normalize_zone()` strips EQL instance suffixes ("Befallen 4
   (Refined)" → "Befallen"). New zone = `ZONE_FILES` (+ `ZONE_ALIASES`,
   `ZONE_GRAPH` adjacency) in map_system.py.
+- Routing (`find_route_ex`, /api/route): walk edges + NAVAL TRANSLOCATOR
+  dock cliques (any dock -> any dock on the route, one hop; boats do not
+  exist on EQL) + druid/wizard PORT RITUALS as jump-from-anywhere edges
+  (?ports= overrides the trio-based default — rituals persist once
+  leveled). Data per rari/eqltools (CC0). `path` stays a plain zone list
+  for old clients; `steps` carries {zone, via} labels.
 - Position feeds: `/loc` lines always; optional screen OCR (RapidOCR — the
   Windows OCR engine silently drops short lines like "Z: 4").
 
@@ -283,6 +296,24 @@ whenever the Inventory parse changes.
   advisory — the gate enforces), not a same-item lower/equal rank, and a
   recommended 2H primary empties the Secondary ROW. Rows whose rec IS the
   worn item render dimmed (status, not a suggestion).
+- **Exaltation sockets are in the Inventory export** (game-authoritative):
+  gear child-rows Slot7..Slot10 encode socket TYPE {7 focus, 8 clicky,
+  9 worn, 10 proc}; the number outranks the wiki-wording heuristic BUT
+  only when the stone sits in real gear (bags reuse 1-10 as positions —
+  `_socket_type_from_export`). Move targets require an EMPTY socket of
+  the stone's number when the export has data (real exports show proc
+  sockets on earrings/faces, so export data OVERRIDES the wiki
+  "proc->weapon" rule); wiki heuristics remain the fallback.
+- **Loot filter** (backend/loot_filter.py, read-only): LF_<Char>_<server>
+  .ini in <game>/userdata; caret rows id^filter^icon^name; actions
+  {1 store, 2 loot, 3 merge, 4 sell}; skip `[..]`/`#` lines; the game
+  REWRITES it live (mtime-cached). Feeds merge notices + /api/loot-filter.
+- **Weapon white-DPS indices** (`weapon_indices`; model per
+  xaziaver/eql-weapon-inflection-analyzer, MIT): the 1H MAIN-HAND damage
+  bonus is a FLAT delay-independent add (floor((level-25)/3), L28+) so
+  fast MH wins beyond ratio; off-hand swings ~(6*level+5)/400 of the
+  time with NO bonus. Gear lines carry [white-DPS index: MH x / OH y]
+  for 1H weapons; INDEX not absolute (ATK/AC unknown), procs excluded.
 - **Exaltations** (informational, NOT prescriptive moves — the real
   socketing rules per eqlwiki/eqlegendstools are now known): a stone shows
   its granted effect, ACTIVE vs DORMANT-until-LN (Effect "at Level N" vs

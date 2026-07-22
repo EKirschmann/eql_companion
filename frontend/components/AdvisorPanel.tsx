@@ -790,6 +790,14 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                             <span className="adv-merge-warn">{m.compare}</span>
                           </>
                         )}
+                        {m.filter_action && (
+                          <>
+                            <br />
+                            <span className="adv-cls">
+                              loot filter: this item is set to auto-{m.filter_action}
+                            </span>
+                          </>
+                        )}
                         {m.hosts_exalt && (
                           <>
                             <br />
@@ -860,7 +868,7 @@ export const AdvisorPanel = memo(function AdvisorPanel({
                   <ul className="adv-list">
                     {gear.exaltations.map((x) => (
                       <li key={x.name}>
-                        <strong>{x.name}</strong>
+                        <strong><ItemHover name={x.name} /></strong>
                         {x.where && <span className="adv-cls"> — {x.where}</span>}
                         <br />
                         {x.why}

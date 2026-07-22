@@ -301,10 +301,34 @@ class Resist(LogEvent):
 
 
 class Faction(LogEvent):
-    """Your faction standing with <faction> has been adjusted by <delta>."""
+    """Adjusted by <delta>, or capped: '... could not possibly get any
+    better/worse.'"""
     type: str = "faction"
     faction: str
     delta: int
+    capped: Optional[str] = None  # "better" | "worse" when at cap
+
+
+class Rune(LogEvent):
+    """You gain a rune for N points of absorption."""
+    type: str = "rune"
+    amount: int
+
+
+class SelfHurt(LogEvent):
+    """You hurt yourself for N points. (cannibalize / DS self-ticks —
+    damage taken, never damage dealt)"""
+    type: str = "self_hurt"
+    damage: int
+
+
+class RandomRoll(LogEvent):
+    """'**Random: 0 to 100**' announce or '<Who> rolls 87 (0-100)'."""
+    type: str = "roll"
+    who: Optional[str] = None
+    value: Optional[int] = None
+    lo: Optional[int] = None
+    hi: Optional[int] = None
 
 
 class ItemMerge(LogEvent):

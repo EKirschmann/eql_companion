@@ -286,6 +286,85 @@ def load_map(zone_name: str) -> Optional[dict]:
     }
 
 
+# EQL travel extras (data per rari/eqltools, CC0; sources: eqlwiki
+# Travel_Guide + Translocators, P99 spell lines). Classic era only;
+# zones absent from ZONE_GRAPH are skipped at runtime.
+# Boats are replaced by NAVAL TRANSLOCATORS: each route is a dock
+# CLIQUE, so any listed dock reaches any other in ONE hop.
+TRANSLOCATOR_CLIQUES: list[list[str]] = [
+    ["South Qeynos", "Erud's Crossing", "Erudin"],
+    ["East Freeport", "Ocean of Tears", "Butcherblock Mountains"],
+]
+# Port RITUALS castable from any loadout once the class is leveled,
+# modeled as a jump from anywhere to the destination zone.
+PORT_SPELLS: dict[str, dict[str, str]] = {
+    "druid": {
+        "Butcherblock Mountains": "Circle of Butcher",
+        "North Karana": "Circle of Karana",
+        "Toxxulia Forest": "Circle of Toxxulia",
+        "West Commonlands": "Circle of Commons",
+        "Surefall Glade": "Circle of Surefall Glade",
+        "Feerrott": "Circle of Feerrott",
+        "Lavastorm Mountains": "Circle of Lavastorm",
+        "Southern Desert of Ro": "Circle of Ro",
+        "Steamfont Mountains": "Circle of Steamfont",
+        "Misty Thicket": "Circle of Misty",
+    },
+    "wizard": {
+        "Greater Faydark": "Fay Portal",
+        "North Karana": "North Portal",
+        "Toxxulia Forest": "Tox Portal",
+        "Cazic-Thule": "Cazic Portal",
+        "West Commonlands": "Common Portal",
+        "Nektulos Forest": "Nek Portal",
+        "Northern Desert of Ro": "Ro Portal",
+        "West Karana": "West Portal",
+    },
+}
+
+
+def find_route_ex(frm: str, to: str,
+                  port_classes: tuple = ()) -> Optional[list[dict]]:
+    """Labeled BFS over walk edges + translocator dock cliques + (when
+    the trio can ritual-cast them) druid/wizard port jumps from any
+    zone. Returns [{"zone", "via"}]; via is None for the start."""
+    start, goal = _canonical(frm), _canonical(to)
+    if (not start or not goal or start not in ZONE_GRAPH
+            or goal not in ZONE_GRAPH):
+        return None
+    if start == goal:
+        return [{"zone": start, "via": None}]
+    port_jumps: dict[str, str] = {}
+    for cls in port_classes:
+        for z, spell in PORT_SPELLS.get(str(cls).lower(), {}).items():
+            if z in ZONE_GRAPH and z not in port_jumps:
+                port_jumps[z] = f"{cls} port ritual: {spell}"
+    clique_of: dict[str, set] = {}
+    for cl in TRANSLOCATOR_CLIQUES:
+        present = [z for z in cl if z in ZONE_GRAPH]
+        for z in present:
+            clique_of.setdefault(z, set()).update(
+                p for p in present if p != z)
+    seen = {start}
+    queue: deque[list[dict]] = deque([[{"zone": start, "via": None}]])
+    while queue:
+        path = queue.popleft()
+        cur = path[-1]["zone"]
+        neigh = [(n, "walk") for n in ZONE_GRAPH.get(cur, [])]
+        neigh += [(n, "naval translocator")
+                  for n in sorted(clique_of.get(cur, ()))]
+        neigh += list(port_jumps.items())
+        for n, via in neigh:
+            if n in seen:
+                continue
+            step = {"zone": n, "via": via}
+            if n == goal:
+                return path + [step]
+            seen.add(n)
+            queue.append(path + [step])
+    return None
+
+
 def find_route(frm: str, to: str) -> Optional[list[str]]:
     """Shortest zone-hop path via BFS, or None."""
     start, goal = _canonical(frm), _canonical(to)

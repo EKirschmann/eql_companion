@@ -1010,9 +1010,31 @@ Rules:
 - Stat-delta language: you know the character's totals ONLY when CHARACTER lists them (Max HP / Max mana / recent combat). NEVER label a stat change "huge", "massive", "tiny", "minor" or similar on its own authority — give the numbers. When Max HP is listed, express HP deltas as a rough percentage of it ("+75 HP ≈ +5.6% of your 1342"); when recent-combat numbers are listed, you may translate HP deltas into average incoming hits ("+75 HP ≈ 2 average hits of survival"). With neither, state the delta neutrally and let the numbers speak.
 - Hands: a weapon with a 2H skill (2H Slash/2H Blunt/2H Piercing) occupies BOTH Primary and Secondary. Never recommend a 2H weapon together with any Secondary item; compare 1H+1H (or 1H+shield) as a package against the 2H alone.
 - farm: 3-6 realistic upgrade targets for their level. STRONGLY prefer items whose drop data appears above or that you know drop in zones near their level; give the zone and the mob/vendor in "source". Never invent stats; mark uncertainty briefly in "why" when relying on memory.
-- Weapons: consider the classes' usable weapon skills; for a Monk trio prefer fist/blunt options.
+- Weapons: consider the classes' usable weapon skills; for a Monk trio prefer fist/blunt options. 1H weapon lines carry deterministic [white-DPS index: MH x / OH y] — USE THEM instead of raw damage/delay ratio: the main-hand damage bonus is a flat, delay-independent add (fast MH weapons carry it more often), the off-hand gets NO bonus and swings only part of the time, so the best MH is often NOT the best OH. Procs are NOT in the index — a strong proc can outweigh a small index gap (off-hand procs fire less often). For 2H: compare its DPS against the MH index + OH index SUM plus the stat difference.
 - exaltations: review where each exaltation is socketed vs what it grants. Recommend moves ONLY when clearly better (an unused bank exaltation with a strong effect, or an effect wasted on unused gear); "move_to" = the item to socket it into. Skip trivial shuffles; note uncertainty about socket compatibility.
 """
+
+
+# The Inventory export's socket NUMBER is the game-authoritative socket
+# type (Slot7..Slot10 child rows on gear — mapping per Velkenn/EQL-
+# Effects-Finder). Bag positions reuse small numbers, so the number is
+# only trusted when the stone's parent row is GEAR, not a container.
+SOCKET_TYPES = {7: "focus", 8: "clicky", 9: "worn", 10: "proc"}
+_SOCKET_NUM = {v: k for k, v in SOCKET_TYPES.items()}
+
+
+def _socket_type_from_export(x: dict) -> Optional[str]:
+    """Trust the socket number as a TYPE only when the stone sits in real
+    GEAR — loose stones in bags reuse 1-10 as bag POSITIONS (a stone at
+    bag position 8 is not a clicky). Gear = worn slot, or a bank/bag row
+    that actually holds a host item (never a Backpack)."""
+    from backend.spellbook import WORN_SLOTS
+    hl = str(x.get("host_loc") or "")
+    host = str(x.get("host") or "")
+    in_gear = (hl in WORN_SLOTS
+               or (host and "backpack" not in host.lower()
+                   and not hl.lower().startswith("general")))
+    return SOCKET_TYPES.get(x.get("socket")) if in_gear else None
 
 
 def _exalt_socket_type(effect: Optional[str]) -> str:
@@ -1110,33 +1132,50 @@ def _class_overlap(a, b) -> bool:
 
 
 async def _exalt_targets(stone_name: str, styp: str,
-                         candidates: List[str]) -> List[str]:
+                         candidates: List[str],
+                         sockets_map: Optional[dict] = None) -> List[str]:
     """Owned items this stone can legally socket into (eqlwiki rules):
     proc -> shared class + weapon (2H proc -> Primary only); focus/clicky/
-    worn -> shared class + same slot. Source item = the stone's own name."""
+    worn -> shared class + same slot. Source item = the stone's own name.
+    When the Inventory export carries socket rows, a target must ALSO
+    have an EMPTY socket of the stone's type number (game-authoritative,
+    stricter than the wiki heuristics)."""
     src = await _item_meta(re.sub(r"\s*[(]Exaltation[)]$", "", stone_name).strip())
     if not src:
         return []
+    need = _SOCKET_NUM.get(styp)
     out = []
     for cand in candidates:
+        socket_known = False
+        if sockets_map and need:
+            empt = sockets_map.get(cand.lower())
+            if empt is not None:
+                socket_known = True
+                if need not in set(empt):
+                    continue  # no empty socket of this type on that item
         tgt = await _item_meta(cand)
         if not tgt:
             continue
         if not _class_overlap(src["classes"], tgt["classes"]):
             continue
-        if styp == "proc":
-            if not tgt["is_weapon"]:
-                continue
-            if src["is_2h"] and "PRIMARY" not in tgt["slots"]:
-                continue
-        else:  # focus / clicky / worn need a shared equipment slot
-            if not (src["slots"] & tgt["slots"]):
-                continue
+        if not socket_known:
+            # no export socket data — fall back to wiki heuristics. (Real
+            # exports show proc sockets on earrings/faces too, so when the
+            # game TELLS us a socket exists, it overrides these rules.)
+            if styp == "proc":
+                if not tgt["is_weapon"]:
+                    continue
+                if src["is_2h"] and "PRIMARY" not in tgt["slots"]:
+                    continue
+            else:  # focus / clicky / worn need a shared equipment slot
+                if not (src["slots"] & tgt["slots"]):
+                    continue
         out.append(cand)
     return out
 
 
-async def _merge_opportunities(items: list, exalts: list) -> list:
+async def _merge_opportunities(items: list, exalts: list,
+                               loot_filter: Optional[dict] = None) -> list:
     """Duplicate owned EQUIPMENT is an EQL merge opportunity: two copies
     of the same base item combine toward the next +N. Deterministic
     notice only — grouped by base name across worn/bags/bank, filtered
@@ -1196,6 +1235,9 @@ async def _merge_opportunities(items: list, exalts: list) -> list:
             "hosts_exalt": key in hosts,
             "worn_pair": len(worn) >= 2,
             "compare": compare,
+            # the game auto-merges/sells/stores per the loot filter — a
+            # "merge" action means new drops combine on pickup already
+            "filter_action": (loot_filter or {}).get(key),
         })
         if len(out) >= 12:
             break
@@ -1215,7 +1257,8 @@ async def generate_gear_advice(ctx: dict) -> dict:
         # deterministic duplicate-item merge notices — every return path
         # (LLM, builtin, fallback) carries them
         "merges": await _merge_opportunities(items,
-                                             ctx.get("exaltations") or []),
+                                             ctx.get("exaltations") or [],
+                                             ctx.get("loot_filter")),
     }
     if not items:
         return {**base, "source": "builtin", "note":
@@ -1226,7 +1269,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
         return {**base, **(await _builtin_gear(ctx))}
     classes = [x.strip() for x in (ctx.get("class_str") or "").split("/")
                if x.strip()]
-    gear = await build_gear_context(items, classes)
+    gear = await build_gear_context(items, classes, level=ctx.get("level"))
     exalts = ctx.get("exaltations") or []
     exalt_lines = []
     exalt_info = []
@@ -1255,7 +1298,7 @@ async def generate_gear_advice(ctx: dict) -> dict:
             pass
         host = (f"socketed in {x['host']} ({x['host_loc']})" if x.get("host")
                 else f"loose in the {x['where']}")
-        styp = _exalt_socket_type(eff)
+        styp = _socket_type_from_export(x) or _exalt_socket_type(eff)
         fits = ("weapon sockets only (Primary/Secondary/Range)"
                 if styp == "proc" else f"{styp} sockets"
                 if styp != "unknown" else "unknown socket type")
@@ -1294,7 +1337,9 @@ async def generate_gear_advice(ctx: dict) -> dict:
         if usable is not False and status != "stat stone":
             try:
                 cur_host = _item_base(x.get("host") or "").lower()
-                elig = [t for t in await _exalt_targets(x["name"], styp, exalt_targets)
+                elig = [t for t in await _exalt_targets(
+                            x["name"], styp, exalt_targets,
+                            ctx.get("item_sockets"))
                         if _item_base(t).lower() != cur_host]
             except Exception:
                 elig = []

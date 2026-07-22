@@ -4,6 +4,44 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.11.0 — 2026-07-21
+
+Community-sourced upgrades (with thanks to kpxcoolx/eql-meter,
+Velkenn/EQL-Effects-Finder, xaziaver/eql-weapon-inflection-analyzer,
+terry-wilkerson/EQL-Loot-Filter-Manager, and rari/eqltools):
+
+- **Exaltation tracking is now game-authoritative.** Your inventory
+  export lists every socket on your gear (type included) — the app now
+  reads them directly: stone types come from the game, "can socket
+  into" requires a genuinely EMPTY socket of the right type, and since
+  real exports show proc sockets on earrings and faces, the export
+  overrides the old proc-goes-in-weapons assumption.
+- **Loot filter awareness**: the app passively reads your LF_*.ini —
+  merge notices now warn when an item is set to auto-sell or
+  auto-merge, and /api/loot-filter summarizes your filter.
+- **Smarter weapon advice**: 1H weapons show main-hand / off-hand
+  white-DPS indices built on the real combat model — the main-hand
+  damage bonus is a flat, delay-independent add (fast MH weapons beat
+  their ratio) and the off-hand swings part-time with no bonus, so the
+  best MH is often not the best OH.
+- **Travel routes use rituals and translocators**: the route finder
+  knows naval translocator dock cliques (Freeport–Butcherblock in one
+  hop) and druid/wizard port rituals castable from anywhere —
+  Rivervale to Erudin is now "cast Circle of Toxxulia, walk to Erudin"
+  instead of nine zone lines.
+- **Combat log accuracy**: rune absorption is tracked (new session
+  stat), "magical skin absorbs the blow" counts as its own defense,
+  self-inflicted damage (cannibalize, damage-shield ticks) counts as
+  damage taken instead of polluting DPS, faction-cap lines parse,
+  raid /who rows no longer misread the group number as your race, and
+  other players' pets swinging as "Name`s warder" fold into their
+  owner instead of vanishing.
+- **Encounters**: each fight now shows its peak 3-second burst DPS,
+  and a "copy" button produces a one-line shareable parse.
+- Exaltation stones in the gear tab show where their base item drops
+  on hover. A real-log regression fixture and
+  `scripts/parser_coverage.py` make the after-patch parser check
+  reproducible.
 ## v1.10.1 — 2026-07-21
 
 Smarter merge notices and exaltation-aware weapon advice:

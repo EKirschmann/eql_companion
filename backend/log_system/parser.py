@@ -106,15 +106,26 @@ RE_DOT_IN = re.compile(r"^You have taken (\d+) damage from (.+?)(?: by (.+?))?[.
 # casterless proc/poison tick: "An orc has taken 6 damage by Weak Poison."
 RE_DOT_BY = re.compile(r"^(.+?) has taken (\d+) damage by (.+?)\.")
 RE_MISS_OUT = re.compile(
-    r"^You try to (\w+) (.+?), but (?:miss|.+? (?:dodges|parries|blocks|ripostes))!")
+    r"^You try to (\w+) (.+?), but (?:miss|.+? (?:dodges|parries|blocks|"
+    r"ripostes)|.+? magical skin absorbs the blow)!")
 RE_MISS_IN = re.compile(
-    r"^(.+?) tries to (\w+) YOU, but (?:misses|YOU (dodge|parry|block|riposte)s?)!")
+    r"^(.+?) tries to (\w+) YOU, but (?:misses|YOU (dodge|parry|block|"
+    r"riposte)s?|YOUR magical skin absorbs the blow)!")
+RE_RUNE = re.compile(r"^You gain a rune for (\d+) points? of absorption\.")
+RE_SELF_HURT = re.compile(r"^You hurt yourself for (\d+) points?")
+RE_ROLL_BANNER = re.compile(r"^\*\*Random(?: Number)?: (\d+) to (\d+)\*\*")
+RE_ROLL = re.compile(rf"^({_PC}) rolls (\d+) \((\d+)-(\d+)\)")
+# other players' pets swing under possessive labels ("Kenkyo`s warder
+# bites...") — rewrite to the "<Owner> pet" convention the tracker folds
+RE_POSSESSIVE_PET = re.compile(
+    rf"^({_PC})[`']s (?:warder|familiar|pet|[a-z]+ elemental)\b")
 RE_COIN = re.compile(r"^You receive (.+?) from the corpse")
 RE_COIN_SPLIT = re.compile(r"^You receive (.+?) as your split")
 RE_VENDOR_SALE = re.compile(r"^You receive (.+?) from (\S+) for the (.+?)\(s\)\.")
 RE_COIN_ITEM = re.compile(r"^You received (.+?) from that item\.")
 RE_FACTION = re.compile(
-    r"^Your faction standing with (.+?) has been adjusted by (-?\d+)\.")
+    r"^Your faction standing with (.+?) (?:has been adjusted by (-?\d+)"
+    r"|could not possibly get any (better|worse))\.")
 # /loc output order is Y, X, Z
 RE_LOC = re.compile(r"^Your Location is (-?[\d.]+), (-?[\d.]+), (-?[\d.]+)")
 RE_BUFF_FADE = re.compile(r"^Your (.+?) spell has worn off")
@@ -127,7 +138,7 @@ RE_HEAL_OUT = re.compile(
 RE_OTHER_HEAL = re.compile(
     rf"^({_PC}) healed (.+?)( over time)? for (\d+)(?: \(\d+\))? hit points by (.+?)\.")
 # [13 Monk] Gentso (Iksar)   /   [65 Transcendent (Monk)] Gentso (Iksar) <Guild>
-RE_WHO = re.compile(r"^\[(\d+) (.+?)\] (\w+) \((.+?)\)")
+RE_WHO = re.compile(r"^(?:AFK +)?\[(\d+) (.+?)\] (\w+) \((.+?)\)")
 # "/pet leader": Gobaner says, 'My leader is Gentso.' — charm pets have
 # multi-word mob names ("An abhorrent says, ...")
 RE_PET_LEADER = re.compile(r"^(.+?) says,? '\s*My leader is (\w+)")
@@ -215,7 +226,8 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
 
     # strip stacked combat tags right-to-left; the raw ledger line keeps them
     body, tags = msg, []
-    if " damage" in msg or " hit points" in msg:
+    if (" damage" in msg or " hit points" in msg
+            or "absorbs the blow" in msg):
         while (t := RE_TAG.match(body)):
             body = t.group(1).rstrip()
             tags.append(t.group(2))
@@ -327,8 +339,10 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
             tgt = tgt[3:]  # "You try to frenzy on a gnoll, but miss!"
         return ev.MissOut(verb=mo.group(1), target=tgt, **base)
     if mi := RE_MISS_IN.match(body):
+        defense = mi.group(3) or ("absorb" if "absorbs" in mi.group(0)
+                                  else "miss")
         return ev.MissIn(attacker=mi.group(1), verb=mi.group(2),
-                         defense=mi.group(3) or "miss", **base)
+                         defense=defense, **base)
     if co := RE_VENDOR_SALE.match(body):
         return ev.Coin(amount=co.group(1), vendor=co.group(2),
                        item=co.group(3), **base)
@@ -339,7 +353,18 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
     if co := RE_COIN_ITEM.match(body):
         return ev.Coin(amount=co.group(1), from_item=True, **base)
     if fa := RE_FACTION.match(body):
-        return ev.Faction(faction=fa.group(1), delta=int(fa.group(2)), **base)
+        return ev.Faction(faction=fa.group(1),
+                          delta=int(fa.group(2)) if fa.group(2) else 0,
+                          capped=fa.group(3), **base)
+    if ru := RE_RUNE.match(body):
+        return ev.Rune(amount=int(ru.group(1)), **base)
+    if sh := RE_SELF_HURT.match(body):
+        return ev.SelfHurt(damage=int(sh.group(1)), **base)
+    if rb := RE_ROLL_BANNER.match(body):
+        return ev.RandomRoll(lo=int(rb.group(1)), hi=int(rb.group(2)), **base)
+    if rl := RE_ROLL.match(body):
+        return ev.RandomRoll(who=rl.group(1), value=int(rl.group(2)),
+                             lo=int(rl.group(3)), hi=int(rl.group(4)), **base)
     if lc := RE_LOC.match(body):
         return ev.LocUpdate(y=float(lc.group(1)), x=float(lc.group(2)),
                             z=float(lc.group(3)), **base)
@@ -381,6 +406,7 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
     if ad := RE_AA_DESC.match(body):
         return ev.AAListMeta(desc=ad.group(1), **base)
 
+    body = RE_POSSESSIVE_PET.sub(r"\1 pet", body)
     if o := RE_OTHER_SPELL.match(body):
         if o.group(1) not in NOT_PLAYERS:
             return ev.OtherDamageOut(
@@ -411,10 +437,13 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
         inner = re.search(r"\(([^)]+)\)", class_str)
         if inner:
             class_str = inner.group(1)
+        race = w.group(4)
+        if race.startswith("Group:"):  # raid /who rows carry the group
+            race = None                # number where zone /who shows race
         if character_name and w.group(3).lower() == character_name.lower():
             return ev.CharacterInfo(
                 name=w.group(3), level=int(w.group(1)),
-                class_str=expand_classes(class_str), race=w.group(4), **base)
+                class_str=expand_classes(class_str), race=race, **base)
         # other players feed the group roster (keep the game's abbreviations)
         return ev.OtherCharInfo(name=w.group(3), level=int(w.group(1)),
                                 classes=class_str, **base)

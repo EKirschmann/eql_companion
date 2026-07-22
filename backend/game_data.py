@@ -530,6 +530,26 @@ def scale_item_line(line: str, rank: int) -> str:
     return out
 
 
+def weapon_indices(dmg: float, delay: float,
+                   level) -> Optional[dict]:
+    """Relative white-DPS indices for 1H weapon comparisons (model per
+    xaziaver/eql-weapon-inflection-analyzer, MIT, stated wiki-verified
+    June 2026 — simplified to inputs we actually know): the main-hand
+    DAMAGE BONUS is a FLAT, delay-independent add (floor((level-25)/3)
+    from L28), so fast MH weapons carry it more often; the off-hand gets
+    NO bonus and only swings ~(level+skill)/400 of the time (skill
+    approximated at its cap, 5*level+5). INDEX, not absolute DPS — real
+    rolls depend on ATK/AC we cannot see. Procs are NOT included."""
+    if not dmg or not delay or not level:
+        return None
+    db = (level - 25) // 3 if level >= 28 else 0
+    delay_s = max(0.5, delay / 10.0)
+    roll = dmg * 1.3  # average damage-roll multiplier (mean d20 of 13)
+    p_oh = min(1.0, (level + 5 * level + 5) / 400.0)
+    return {"mh": round((roll + db) / delay_s, 1),
+            "oh": round(roll / delay_s * p_oh, 1), "db": db}
+
+
 def item_stat_vector(line: str) -> dict:
     """Canonical stat -> value parsed from a (scaled) compact line, for
     deterministic comparisons. Includes DELAY (lower is better) and the
@@ -807,7 +827,8 @@ def _trio_usable(line: str, classes: list) -> Optional[bool]:
 
 
 async def build_gear_context(items: list, classes: Optional[list] = None,
-                             max_items: int = 100) -> dict:
+                             max_items: int = 100,
+                             level=None) -> dict:
     """Stat lines for every unique owned item that has an equipment page,
     annotated with deterministic trio eligibility so the LLM never does the
     class math itself. Returns {"lines": [...], "unknown": [names]} — first
@@ -843,6 +864,16 @@ async def build_gear_context(items: list, classes: Optional[list] = None,
                     tag = " [USABLE]"
                 elif usable is False:
                     tag = " [NOT USABLE by this trio]"
+            # 1H weapons: deterministic MH/OH white-DPS indices so the
+            # model never reasons from ratio alone (flat MH damage bonus
+            # is delay-independent; OH swings part-time with no bonus)
+            wm = re.search(r"DMG: (\d+)", line)
+            dm = re.search(r"Atk Delay: (\d+)", line)
+            if wm and dm and level and "Skill: 2H" not in line:
+                wi = weapon_indices(int(wm.group(1)), int(dm.group(1)), level)
+                if wi:
+                    note += (f" [white-DPS index: MH {wi['mh']} / "
+                             f"OH {wi['oh']}]")
             lines.append(f"{entry['name']} [{where}]{tag}{note} — {line}")
         else:
             unknown.append(entry["name"])
