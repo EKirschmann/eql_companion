@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { apiGet, apiSend } from "@/lib/api";
-import type { SessionSummary, Snapshot } from "@/lib/types";
+import type { SessionSummary, Snapshot, TrioCompareRow } from "@/lib/types";
 
 const PLAYSTYLES = [
   "solo_dps", "group_dps", "tank", "healer", "support", "pet_focused", "balanced",
@@ -32,11 +32,15 @@ export const CharacterPanel = memo(function CharacterPanel({
   const [hpDraft, setHpDraft] = useState("");
   const [manaDraft, setManaDraft] = useState("");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [trios, setTrios] = useState<TrioCompareRow[]>([]);
   useEffect(() => {
     if (!snap?.name) return;
     apiGet<{ history: SessionSummary[] }>("/api/sessions")
       .then((d) => setSessions(d.history ?? []))
       .catch(() => setSessions([]));
+    apiGet<{ trios: TrioCompareRow[] }>("/api/trio-compare")
+      .then((d) => setTrios(d.trios ?? []))
+      .catch(() => setTrios([]));
   }, [snap?.name]);
   useEffect(() => {
     setHpDraft(snap?.max_hp != null ? String(snap.max_hp) : "");
@@ -242,6 +246,30 @@ export const CharacterPanel = memo(function CharacterPanel({
                 <li key={`${item}-${i}`}>{item}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {trios.length > 1 && (
+          <div className="loot-list hunt-list">
+            <h3>Trio comparison</h3>
+            <table className="hunt-table">
+              <thead>
+                <tr>
+                  <th scope="col">Trio</th>
+                  <th scope="col">Fights</th>
+                  <th scope="col" title="Total damage / total fight seconds">DPS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trios.slice(0, 5).map((tr) => (
+                  <tr key={tr.trio} title={tr.top_zones.join(", ") || undefined}>
+                    <td className="hunt-name">{tr.trio}</td>
+                    <td>{tr.fights}</td>
+                    <td>{tr.avg_dps}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

@@ -222,3 +222,18 @@ MECHANICS = [
      re.compile("Master Yael shouts"),
      45),
 ]
+
+# Ability cooldowns (seconds) started on cast/activation and SNAPPED to
+# the game's own "You can use the ability X again in M minute(s) S
+# seconds." readout whenever it prints. Shaves: landing the listed verb
+# reduces the named cooldown (facts per GiuffreLab/eql-metrics README).
+ABILITY_COOLDOWNS = {
+    "lay on hands": 900,
+    "harm touch": 1200,
+    "quick buff": 600,
+}
+# melee verb -> (cooldown timer to reduce, seconds shaved per landing)
+COOLDOWN_SHAVES = {
+    "smite": ("Lay on Hands", 60),
+    "reave": ("Harm Touch", 60),
+}

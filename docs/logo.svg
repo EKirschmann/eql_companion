@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="140" viewBox="0 0 760 140" role="img" aria-label="EQL Companion">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e7cd92"/>
+      <stop offset="0.55" stop-color="#c8aa6e"/>
+      <stop offset="1" stop-color="#8f7443"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#181c22"/>
+      <stop offset="1" stop-color="#101318"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="757" height="137" fill="url(#bg)" stroke="rgba(200,170,110,0.34)" stroke-width="1"/>
+  <rect x="7.5" y="7.5" width="745" height="125" fill="none" stroke="rgba(200,170,110,0.18)" stroke-width="1"/>
+  <!-- gauge motif: four flat square-ended bars -->
+  <rect x="40" y="44" width="52" height="7" fill="#c8aa6e"/>
+  <rect x="40" y="58" width="36" height="7" fill="#d4574a"/>
+  <rect x="40" y="72" width="44" height="7" fill="#1fb38c"/>
+  <rect x="40" y="86" width="24" height="7" fill="#b07cc6"/>
+  <text x="120" y="76" font-family="Georgia, 'Times New Roman', serif" font-size="50" letter-spacing="5" fill="url(#gold)" font-weight="bold">EQL COMPANION</text>
+  <rect x="120" y="86" width="590" height="1" fill="rgba(200,170,110,0.34)"/>
+  <text x="121" y="105" font-family="Georgia, 'Times New Roman', serif" font-size="12" letter-spacing="3.4" fill="#8b8577">A LOG-AWARE ADVISOR FOR EVERQUEST LEGENDS</text>
+</svg>

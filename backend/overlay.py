@@ -49,10 +49,14 @@ RED = "#d4574a"
 
 W = 300
 HEADER_H = 22
+HERO_H = 30
 SEC_H = 15
 ROW_H = 17
 TROW_H = 14
 HINT_H = 13
+VK_CONTROL = 0x11
+VK_MENU = 0x12
+VK_X = 0x58
 
 SECTIONS = ("combat", "timers", "session", "loot", "progress")
 ALERT_BANNER_SECS = 6.0
@@ -134,7 +138,10 @@ def timer_rows(snap):
         rem = t.get("remaining", 0)
         mins, secs = divmod(max(0, int(rem)), 60)
         clock = f"{mins}:{secs:02d}" if mins else f"{secs}s"
-        color = RED if rem <= 5 else (GOLD if t.get("kind") == "raid" else INK)
+        kind = t.get("kind")
+        color = (RED if rem <= 5 else
+                 GOLD if kind == "raid" else
+                 HEAL if kind == "cooldown" else INK)
         rows.append((t.get("name", "?")[:30], clock, color))
     return rows or [("no active timers", "", MUTED)]
 
@@ -155,7 +162,10 @@ def session_rows(snap):
          f"{_fmt_coin(act('coin'))}/hr", INK),
         (f"crits {s.get('crits', 0)} · hit {s.get('hit_rate', 0):g}%",
          f"rune {_fmt(s.get('rune_absorbed', 0))}", MUTED),
-    ]
+    ] + ([(f"motes {sum((s.get('motes') or {}).values())} · "
+           + " ".join(f"{k[:5]} {v}" for k, v in
+                      sorted((s.get('motes') or {}).items())[:3]),
+           "", MUTED)] if s.get("motes") else [])
 
 
 def loot_rows(snap):
@@ -226,6 +236,10 @@ class OverlayMeter:
         self.alpha = min(1.0, max(0.35, float(st.get("alpha", 0.90))))
         self.collapsed = {k: bool(st.get("collapsed", {}).get(k, False))
                           for k in SECTIONS}
+        self.pinned = {k: bool(st.get("pinned", {}).get(k, False))
+                       for k in SECTIONS}
+        self.force_interactive = False  # Ctrl+Alt+X toggle (not persisted)
+        self._hot_prev = False
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -268,7 +282,7 @@ class OverlayMeter:
             STATE_FILE.write_text(json.dumps({
                 "x": self.root.winfo_x(), "y": self.root.winfo_y(),
                 "alpha": round(self.alpha, 2), "compact": self.compact,
-                "collapsed": self.collapsed,
+                "collapsed": self.collapsed, "pinned": self.pinned,
                 "mode": self.mode, "segment": self.segment,
             }), encoding="utf-8")
         except Exception:
@@ -301,7 +315,10 @@ class OverlayMeter:
             else:
                 for y0, y1, key in self._sec_zones:
                     if y0 <= e.y <= y1:
-                        self.collapsed[key] = not self.collapsed[key]
+                        if e.x >= W - 18:   # star zone: pin to compact strip
+                            self.pinned[key] = not self.pinned[key]
+                        else:
+                            self.collapsed[key] = not self.collapsed[key]
                         break
         self._drag = None
         self._save_state()
@@ -388,10 +405,34 @@ class OverlayMeter:
         summary = extra if not self.collapsed[key] else section_summary(
             key, self.snap, self.history, self.segment)
         if summary:
-            c.create_text(W - 6, y + SEC_H // 2, anchor="e", fill=MUTED,
-                          font=("Consolas", 7), text=summary[:34])
+            c.create_text(W - 18, y + SEC_H // 2, anchor="e", fill=MUTED,
+                          font=("Consolas", 7), text=summary[:32])
+        c.create_text(W - 6, y + SEC_H // 2, anchor="e",
+                      fill=GOLD if self.pinned[key] else "#3a3f47",
+                      font=("Consolas", 8), text="*")
         self._sec_zones.append((y, y + SEC_H, key))
         return y + SEC_H
+
+    def _hero_band(self, c, y) -> int:
+        """Three big numbers: FIGHT dps | SESSION dps | BEST dps."""
+        s = (self.snap or {}).get("session") or {}
+        r = (self.snap or {}).get("rates") or {}
+        active_h = r.get("active_hours") or 0
+        sess_dps = (s.get("damage_dealt", 0) / (active_h * 3600)
+                    if active_h > 0 else 0)
+        vals = ((f"{(self.snap or {}).get('dps', 0):g}", "FIGHT"),
+                (f"{sess_dps:,.0f}", "SESSION"),
+                (f"{(self.snap or {}).get('session_max_dps', 0):g}", "BEST"))
+        c.create_rectangle(0, y, W, y + HERO_H, fill=BG, width=0)
+        col_w = W // 3
+        for i, (val, label) in enumerate(vals):
+            cx = i * col_w + col_w // 2
+            c.create_text(cx, y + 11, anchor="center",
+                          fill=BRIGHT if i == 0 else INK,
+                          font=("Consolas", 12, "bold"), text=val)
+            c.create_text(cx, y + 24, anchor="center", fill=MUTED,
+                          font=("Consolas", 6), text=label)
+        return y + HERO_H
 
     def _text_rows(self, c, y, rows) -> int:
         for left, right, color in rows:
@@ -404,7 +445,15 @@ class OverlayMeter:
         return y
 
     def _render(self) -> None:
-        interactive = bool(ctypes.windll.user32.GetKeyState(VK_SCROLL) & 1)
+        # Ctrl+Alt+X toggles interactivity even while click-through
+        hot = bool(ctypes.windll.user32.GetAsyncKeyState(VK_CONTROL) & 0x8000
+                   and ctypes.windll.user32.GetAsyncKeyState(VK_MENU) & 0x8000
+                   and ctypes.windll.user32.GetAsyncKeyState(VK_X) & 0x8000)
+        if hot and not self._hot_prev:
+            self.force_interactive = not self.force_interactive
+        self._hot_prev = hot
+        interactive = (bool(ctypes.windll.user32.GetKeyState(VK_SCROLL) & 1)
+                       or self.force_interactive)
         self._set_click_through(not interactive)
         c = self.canvas
         c.delete("all")
@@ -420,12 +469,19 @@ class OverlayMeter:
         y = HEADER_H
         c.create_rectangle(0, 0, W, HEADER_H, fill=HEADER_BG, width=0)
         if self.compact:
-            xp_act = (r.get("xp") or {}).get("active_hr", 0)
-            coin_act = (r.get("coin") or {}).get("active_hr", 0)
-            header = (f"{my_dps:g}dps · {s.get('kills', 0)}k · "
-                      f"{xp_act:g}%/hr · {_fmt_coin(coin_act)}/hr")
+            pinned = [k for k in SECTIONS if self.pinned.get(k)]
+            if pinned:
+                header = " | ".join(
+                    section_summary(k, self.snap, self.history, self.segment)
+                    for k in pinned)
+            else:
+                xp_act = (r.get("xp") or {}).get("active_hr", 0)
+                coin_act = (r.get("coin") or {}).get("active_hr", 0)
+                header = (f"{my_dps:g}dps · {s.get('kills', 0)}k · "
+                          f"{xp_act:g}%/hr · {_fmt_coin(coin_act)}/hr")
             c.create_text(6, HEADER_H // 2, anchor="w", fill=GOLD,
-                          font=("Consolas", 9, "bold"), text=f"EQL {header}")
+                          font=("Consolas", 9, "bold"),
+                          text=f"EQL {header}"[:46])
         else:
             mode_label = "Damage" if self.mode == "damage" else "DPS"
             c.create_text(8, HEADER_H // 2, anchor="w", fill=GOLD,
@@ -462,6 +518,7 @@ class OverlayMeter:
                           text="companion offline (:8000)")
             y += TROW_H
         elif not self.compact:
+            y = self._hero_band(c, y)
             # ---- COMBAT ----
             y = self._sec_header(c, y, "combat", "COMBAT")
             if not self.collapsed["combat"]:
@@ -507,8 +564,8 @@ class OverlayMeter:
         if interactive:
             c.create_text(6, hint_y, anchor="w", fill=GOLD,
                           font=("Consolas", 7),
-                          text="MOVABLE · title=mode/segment · section=fold "
-                               "· c=compact · ±=opacity · dbl-click closes")
+                          text="MOVABLE · section=fold · *=pin · c=compact "
+                               "· ±=opacity · Ctrl+Alt+X=lock · dbl-click closes")
         else:
             c.create_text(6, hint_y, anchor="w", fill=MUTED,
                           font=("Consolas", 7),

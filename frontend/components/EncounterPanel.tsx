@@ -164,6 +164,21 @@ export const EncounterPanel = memo(function EncounterPanel({
                     .join(" · ")}
                 </div>
               )}
+              {(enc.timeline?.length ?? 0) > 2 && (
+                <div className="enc-timeline" aria-label="Damage over the fight (2s buckets)">
+                  {(() => {
+                    const tl = enc.timeline ?? [];
+                    const top = Math.max(...tl, 1);
+                    return tl.map((v, i) => (
+                      <span
+                        key={i}
+                        className="enc-tl-bar"
+                        style={{ height: `${Math.max(2, Math.round((v / top) * 22))}px` }}
+                      />
+                    ));
+                  })()}
+                </div>
+              )}
               {foes.length > 1 && (
                 <ul className="enc-foes" aria-label="Foes in this encounter">
                   {foes.map((f) => (

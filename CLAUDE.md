@@ -179,12 +179,32 @@ hours-to-level estimate (exact only after a same-session ding).
   no comma). Timers surface in snapshot["timers"], the overlay TIMERS
   section, and a Vitals list.
 - **Tracked rules** (backend/alerts.py, data/tracked_rules.json):
-  SUBSTRING-only matches (never regex) on loot/kill/death/zone; 5s
-  per-rule cooldown; live events only; mtime-reloaded on edit. Fired
+  SUBSTRING-only matches (never regex) on loot/kill/death/zone/tell/
+  fade ("*" = match all) plus "bighit" (pattern = damage threshold); 5s
+  per-rule cooldown; live events only; mtime-reloaded on edit.
+  BUILT-INS need no rules: "You have been summoned!" and your name in
+  group/guild/raid chat always alert. Tells parse BEFORE the chat guard
+  (Tell/GroupChat events; group_chat never enters the ledger/WS). Fired
   alerts ride snapshot["alerts"]; the OVERLAY renders the banner and
   plays the winsound chime (nothing else beeps). GET /api/tracked-rules
   shows the parsed rules. TTS deliberately omitted — point users at
   the standalone eql-alerts app for voice callouts.
+- **Ability cooldowns**: cast/activation of ABILITY_COOLDOWNS entries
+  (LoH 900s, Harm Touch 1200s, Quick Buff 600s) starts a "cooldown"
+  timer under the TIER-STRIPPED canonical name; a landed Smite/Reave
+  SHAVES 60s off its cooldown (COOLDOWN_SHAVES); the game's oracle
+  line ("You can use the ability X again in M minute(s) S seconds.")
+  SNAPS the timer exact whenever it prints.
+- **Buff-fade lines carry a target** ("worn off of <target>" — the
+  mez/charm-break signal): fades cancel the matching spell timer and
+  fire "fade"-kind rules; "Your pet's X" fades are recognized and
+  excluded.
+- "Your active classes are ..." (Composition) sets the trio like /who
+  when all three names resolve. Session stats also track stuns_taken,
+  OVERHEAL (the parenthesized potential heal value), and motes by
+  tier. Encounters carry "trio" (per-trio DPS comparison via
+  GET /api/trio-compare) and a 2s-bucket damage "timeline" (the
+  Encounter panel sparkline).
 
 ## Session persistence (survives restarts)
 

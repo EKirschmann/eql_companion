@@ -52,8 +52,16 @@ def looks_like_eql(p: Path) -> bool:
 
 
 def find_installs() -> list:
-    """Scan every drive for the launcher's standard install locations."""
+    """The game's own registry entry first (finds CUSTOM install paths
+    with zero typing), then a scan of every drive's standard spots."""
     hits = []
+    try:
+        from backend.config import _registry_game_dir
+        reg = _registry_game_dir()
+        if reg and looks_like_eql(Path(reg)):
+            hits.append(Path(reg))
+    except Exception:
+        pass
     for drive in string.ascii_uppercase:
         for pattern in (
             rf"{drive}:\Users\Public\{GAME_SUFFIX}",
@@ -70,7 +78,7 @@ def find_installs() -> list:
 def choose_game_dir() -> str:
     say()
     say("== 1/3 · Your EverQuest Legends install ==")
-    say("Scanning drives for the game ...")
+    say("Looking for the game (registry entry, then every drive) ...")
     hits = find_installs()
     if hits:
         for i, h in enumerate(hits, 1):

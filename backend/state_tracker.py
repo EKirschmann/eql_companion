@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from backend import alerts, spell_file
-from backend.alert_data import SPELL_TIMERS
+from backend.alert_data import (ABILITY_COOLDOWNS, COOLDOWN_SHAVES,
+                                SPELL_TIMERS)
 from backend.log_system import events as ev
 from backend.log_system.parser import CLASS_ABBREV, strip_tier
 
@@ -143,6 +144,9 @@ class CharacterTracker:
         self.alerts: deque = deque(maxlen=8)
         self._alert_seq = 0
         self._alert_cooldown: dict = {}
+        self.stuns_taken = 0
+        self.overheal = 0          # attempted-minus-landed healing
+        self.motes: dict = {}      # mote tier -> count looted
         # finished sessions awaiting DB persistence (login banner rolls
         # the session over; drained by the flush loop like encounters)
         self.pending_sessions: list = []
@@ -164,7 +168,7 @@ class CharacterTracker:
                 del self.pending_encounters[:-10]
             self.encounter = {"started": ts, "last": ts, "target": None,
                               "total_out": 0, "total_in": 0, "abilities": {},
-                              "foes": {}}
+                              "foes": {}, "trio": self.class_str}
         else:
             self.encounter["last"] = ts
 
@@ -316,9 +320,26 @@ class CharacterTracker:
                 self.spell_casts.add(e.spell.lower())
                 self.spell_casts.add(strip_tier(e.spell).lower())
                 if live:
-                    secs = SPELL_TIMERS.get(strip_tier(e.spell).lower())
-                    if secs:
-                        self._start_timer(e.spell, secs, "spell", e.ts)
+                    base = strip_tier(e.spell).lower()
+                    if base in ABILITY_COOLDOWNS:
+                        # cooldown abilities get ONE timer (the pack also
+                        # lists some as "durations" — the cooldown wins)
+                        self._start_cooldown(e.spell, e.ts)
+                    else:
+                        secs = SPELL_TIMERS.get(base)
+                        if secs:
+                            self._start_timer(e.spell, secs, "spell", e.ts)
+        elif isinstance(e, ev.Composition):
+            # the log's own trio line — authoritative like /who
+            from backend.log_system.parser import CLASS_ABBREV as _CA
+            names = [p.strip() for p in
+                     re.split(r"[,/&]| and ", e.class_str) if p.strip()]
+            full = [next((v for v in _CA.values()
+                          if v.lower() == n.lower()), None) for n in names]
+            if len(full) == 3 and all(full):
+                self.class_str = "/".join(full)
+                self.unknown_casts.clear()
+                self.loadout_hint = None
         elif isinstance(e, ev.AAListEntry):
             # ownership data, not session data: applies in seed replay too.
             # Skip listings OLDER than what we already hold (e.g. the seed
@@ -373,6 +394,14 @@ class CharacterTracker:
                     self.crits += 1
                 if isinstance(e, ev.MeleeOut):
                     self.swings_hit += 1
+                    shave = COOLDOWN_SHAVES.get(e.verb)
+                    if shave:
+                        # a landed Smite/Reave shaves its big cooldown
+                        for t in self.active_timers:
+                            if (t["kind"] == "cooldown" and
+                                    t["name"].lower().startswith(
+                                        shave[0].lower())):
+                                t["ends"] -= timedelta(seconds=shave[1])
                     self._encounter_ability(e.ts, e.verb.capitalize(), "melee",
                                             e.damage, e.target, crit=e.crit)
                 elif isinstance(e, ev.SpellDamageOut):
@@ -427,6 +456,12 @@ class CharacterTracker:
                         allies[who] = allies.get(who, 0) + e.damage
             elif isinstance(e, (ev.MeleeIn, ev.SpellDamageIn)):
                 self.damage_taken += e.damage
+                thr = alerts.bighit_threshold()
+                if thr and e.damage >= thr:
+                    src = getattr(e, "spell", None) or getattr(e, "verb", "hit")
+                    self._push_alert(
+                        "bighit", f"-{e.damage} from {e.attacker} ({src})",
+                        e.ts)
                 # a "pet" that hits US is charmed no longer — drop the claim
                 if ((self.pet_owners.get(e.attacker) or "").lower()
                         == (self.name or "").lower()):
@@ -447,6 +482,8 @@ class CharacterTracker:
                 self.healing_received += e.amount
             elif isinstance(e, ev.HealOut):
                 self.healing_done += e.amount
+                if e.potential and e.potential > e.amount:
+                    self.overheal += e.potential - e.amount
                 if e.crit:
                     self.crits += 1
                 self._encounter_heal(e.ts, f"{e.spell} — You", e.amount,
@@ -488,6 +525,27 @@ class CharacterTracker:
                     self._encounter_foe(e.victim, slain=True)
             elif isinstance(e, ev.MechanicTimer):
                 self._start_timer(e.name, e.seconds, "raid", e.ts)
+            elif isinstance(e, ev.AbilityActivate):
+                self._start_cooldown(e.name, e.ts)
+            elif isinstance(e, ev.CooldownReadout):
+                # the game's own remaining-time oracle — snap to it
+                self._start_timer(f"{strip_tier(e.name)} ready", e.seconds,
+                                  "cooldown", e.ts)
+            elif isinstance(e, ev.Summoned):
+                self._push_alert("summon", "You have been summoned!", e.ts)
+            elif isinstance(e, ev.Stunned):
+                self.stuns_taken += 1
+            elif isinstance(e, ev.Tell):
+                self._fire_alerts("tell", f"{e.sender}: {e.text}", e.ts)
+            elif isinstance(e, ev.GroupChat):
+                if self.name and self.name.lower() in e.text.lower():
+                    self._push_alert(
+                        "mention", f"[{e.channel}] {e.sender}: {e.text}", e.ts)
+            elif isinstance(e, ev.BuffFade):
+                if not e.pet:
+                    self._cancel_timer(e.spell)
+                    label = e.spell + (f" ({e.target})" if e.target else "")
+                    self._fire_alerts("fade", label, e.ts)
             elif isinstance(e, ev.CastFizzle):
                 self._cancel_timer(e.spell)
             elif isinstance(e, ev.CastInterrupted):
@@ -539,6 +597,10 @@ class CharacterTracker:
                 self.loot_count += max(e.count, 1)
                 self._fire_alerts("loot", e.item, e.ts)
                 # loot lines name the corpse: exact per-mob attribution
+                mote = re.match(r"^Mote of (.+?) Potential$", e.item)
+                if mote:
+                    tier = mote.group(1)
+                    self.motes[tier] = self.motes.get(tier, 0) + max(e.count, 1)
                 if e.source and "'s corpse" in e.source:
                     mob = _foe_key(e.source.split("'s corpse")[0].strip())
                     stats = self._mob(mob)
@@ -563,7 +625,8 @@ class CharacterTracker:
 
         self._dirty = True
         if e.type not in ("other_out", "aa_list", "aa_meta", "who_other",
-                          "pet_inv_header", "pet_gear", "pet_attack"):
+                          "pet_inv_header", "pet_gear", "pet_attack",
+                          "group_chat"):
             # other_out is too spammy; aa listing bursts are metadata
             self.ledger.append({**e.model_dump(mode="json"), "live": live})
 
@@ -608,6 +671,17 @@ class CharacterTracker:
              for t in self.active_timers),
             key=lambda t: t["remaining"])
 
+    def _push_alert(self, kind: str, text: str, ts: datetime,
+                    sound: bool = True) -> None:
+        key = "builtin:" + kind
+        last = self._alert_cooldown.get(key)
+        if last and (ts - last).total_seconds() < 5:
+            return
+        self._alert_cooldown[key] = ts
+        self._alert_seq += 1
+        self.alerts.append({"id": self._alert_seq, "ts": ts.isoformat(),
+                            "kind": kind, "text": text, "sound": sound})
+
     def _fire_alerts(self, kind: str, text: str, ts: datetime) -> None:
         for rule in alerts.match(kind, text):
             key = rule["kind"] + ":" + rule["pattern"]
@@ -620,6 +694,12 @@ class CharacterTracker:
                 "id": self._alert_seq, "ts": ts.isoformat(),
                 "kind": rule["kind"], "text": text,
                 "sound": bool(rule.get("sound", True))})
+
+    def _start_cooldown(self, name: str, ts: datetime) -> None:
+        base = strip_tier(name)  # canonical: cast tiers and the game
+        secs = ABILITY_COOLDOWNS.get(base.lower())  # oracle share a name
+        if secs:
+            self._start_timer(f"{base} ready", secs, "cooldown", ts)
 
     def session_summary(self) -> dict:
         """Snapshot of the CURRENT session's headline numbers — archived
@@ -658,6 +738,8 @@ class CharacterTracker:
         self.swings_hit = self.swings_missed = 0
         self.crits = self.coin_copper = self.rune_absorbed = 0
         self.loot_count = 0
+        self.stuns_taken = self.overheal = 0
+        self.motes = {}
         self.loots.clear()
         self.mob_stats = {}
         self._last_kill = None
@@ -713,6 +795,18 @@ class CharacterTracker:
         for k in secs:
             peak = max(peak, secs.get(k, 0) + secs.get(k + 1, 0)
                        + secs.get(k + 2, 0))
+        # 2s-bucket damage timeline for the sparkline (capped at 4 min)
+        timeline: list = []
+        if secs:
+            start_s = int(enc["started"].timestamp())
+            buckets: dict = {}
+            for k, v in secs.items():
+                b = (k - start_s) // 2
+                if 0 <= b < 120:
+                    buckets[b] = buckets.get(b, 0) + v
+            if buckets:
+                timeline = [buckets.get(i, 0)
+                            for i in range(max(buckets) + 1)]
         abilities = [
             {
                 "name": name,
@@ -780,6 +874,8 @@ class CharacterTracker:
             "resists": dict(enc.get("resists") or {}),
             "dps": round(enc["total_out"] / duration, 1),
             "peak_dps": round(peak / 3.0, 1),
+            "trio": enc.get("trio"),
+            "timeline": timeline,
             "abilities": abilities,
         }
 
@@ -1025,6 +1121,9 @@ class CharacterTracker:
                 "crits": self.crits,
                 "coin_copper": self.coin_copper,
                 "rune_absorbed": self.rune_absorbed,
+                "stuns_taken": self.stuns_taken,
+                "overheal": self.overheal,
+                "motes": dict(self.motes),
                 "hit_rate": round(
                     100 * self.swings_hit / max(self.swings_hit + self.swings_missed, 1), 1),
                 "loots": list(self.loots),

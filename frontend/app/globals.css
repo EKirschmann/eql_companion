@@ -1768,3 +1768,20 @@ button.app-version:hover { color: var(--gold-bright); }
 .vital-timers li[data-kind="raid"] { border-left-color: var(--milestone); }
 .vital-timers li[data-short="1"] .vital-timer-clock { color: var(--dmg-in); font-weight: 600; }
 .vital-timer-clock { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* fight damage sparkline (2s buckets) */
+.enc-timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 24px;
+  margin: 4px 0 2px;
+  overflow: hidden;
+}
+.enc-tl-bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  max-width: 6px;
+  background: var(--dmg-out);
+  opacity: 0.75;
+}

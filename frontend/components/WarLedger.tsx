@@ -73,6 +73,21 @@ function classify(r: LedgerRow): {
         text: r.capped ? `Faction maxed (${r.capped}): ${r.faction}` : `Faction: ${r.faction}`,
         value: r.capped ? undefined : `${Number(r.delta) > 0 ? "+" : ""}${r.delta}`,
       };
+    case "tell":
+      return { kind: "cast", text: `${r.sender} tells you: ${r.text}` };
+    case "summoned":
+      return { kind: "in", text: "YOU HAVE BEEN SUMMONED" };
+    case "stunned":
+      return { kind: "dim", text: "Stunned" };
+    case "mend":
+      return { kind: "heal", text: "Mend" };
+    case "cooldown_readout":
+      return { kind: "dim", text: `${r.name} ready in ${r.seconds}s` };
+    case "buff_fade":
+      return {
+        kind: "dim",
+        text: r.target ? `${r.spell} broke on ${r.target}` : `${r.spell} faded`,
+      };
     case "rune":
       return { kind: "heal", text: "Rune absorbs", value: `${r.amount}` };
     case "self_hurt":
@@ -105,8 +120,7 @@ function classify(r: LedgerRow): {
           ? `Looted ${r.item} → ${r.upgraded_to}`
           : `Looted ${r.item}`,
       };
-    case "buff_fade":
-      return { kind: "dim", text: `${r.spell} faded` };
+
     default:
       return { kind: "dim", text: String(r.raw ?? r.type) };
   }

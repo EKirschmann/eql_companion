@@ -130,15 +130,31 @@ RE_FACTION = re.compile(
     r"|could not possibly get any (better|worse))\.")
 # /loc output order is Y, X, Z
 RE_LOC = re.compile(r"^Your Location is (-?[\d.]+), (-?[\d.]+), (-?[\d.]+)")
-RE_BUFF_FADE = re.compile(r"^Your (.+?) spell has worn off")
+RE_BUFF_FADE = re.compile(
+    r"^Your (?:(pet)['`]s )?(.+?) spell has worn off(?: of (.+?))?\.?$")
+RE_COOLDOWN = re.compile(
+    r"^You can use the ability (.+?) again in (\d+) minute\(s\) (\d+) seconds\.")
+RE_ACTIVATE = re.compile(r"^You activate (.+?)\.")
+RE_TELL = re.compile(rf"^({_PC}) tells you, '(.{{0,120}})")
+RE_GROUP_CHAT = re.compile(
+    rf"^({_PC}) tells the (group|guild|raid)(?: of \d+)?, '(.{{0,160}})")
+RE_SUMMONED = re.compile(r"^You have been summoned!")
+RE_STUNNED = re.compile(r"^You are stunned!")
+RE_MEND = re.compile(r"^You mend your wounds and heal some damage\.")
+RE_HIDE_OK = re.compile(r"^You have hidden yourself from view\.")
+RE_HIDE_FAIL = re.compile(r"^You failed to hide yourself\.")
+RE_SNEAK_OK = re.compile(r"^You are as quiet as a cat stalking its prey\.")
+RE_SNEAK_FAIL = re.compile(
+    r"^You are as quiet as a herd of running elephants\.")
+RE_COMPOSITION = re.compile(r"^Your active classes are[: ]+(.+?)\.?$")
 RE_HEAL = re.compile(r"^You have been healed for (\d+) (?:hit )?points")
 # "You healed Zizoo over time for 92 hit points by Blooming Heal."
 RE_HEAL_OUT = re.compile(
-    r"^You healed (.+?)( over time)? for (\d+)(?: \(\d+\))? hit points by (.+?)\.")
+    r"^You healed (.+?)( over time)? for (\d+)(?: \((\d+)\))? hit points by (.+?)\.")
 # "Bosh healed itself for 159 (210) hit points by Spirit Tap." — group
 # members, pets, and mobs: the healer IS named; parens = pre-cap value
 RE_OTHER_HEAL = re.compile(
-    rf"^({_PC}) healed (.+?)( over time)? for (\d+)(?: \(\d+\))? hit points by (.+?)\.")
+    rf"^({_PC}) healed (.+?)( over time)? for (\d+)(?: \((\d+)\))? hit points by (.+?)\.")
 # [13 Monk] Gentso (Iksar)   /   [65 Transcendent (Monk)] Gentso (Iksar) <Guild>
 RE_WHO = re.compile(r"^(?:AFK +)?\[(\d+) (.+?)\] (\w+) \((.+?)\)")
 # "/pet leader": Gobaner says, 'My leader is Gentso.' — charm pets have
@@ -249,6 +265,11 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
         return ev.PetAttack(pet=pa.group(1), **base)
     if pl := RE_PET_LEADER.match(body):
         return ev.PetLeader(pet=pl.group(1), owner=pl.group(2), **base)
+    if tl := RE_TELL.match(body):
+        return ev.Tell(sender=tl.group(1), text=tl.group(2).rstrip("'"), **base)
+    if gc := RE_GROUP_CHAT.match(body):
+        return ev.GroupChat(sender=gc.group(1), channel=gc.group(2),
+                            text=gc.group(3).rstrip("'"), **base)
     if RE_CHAT.search(body):
         return None  # speech — players quoting combat text stay out
 
@@ -373,17 +394,42 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
         return ev.LocUpdate(y=float(lc.group(1)), x=float(lc.group(2)),
                             z=float(lc.group(3)), **base)
     if bf := RE_BUFF_FADE.match(body):
-        return ev.BuffFade(spell=bf.group(1), **base)
+        return ev.BuffFade(spell=bf.group(2), target=bf.group(3),
+                           pet=bool(bf.group(1)), **base)
+    if cd := RE_COOLDOWN.match(body):
+        return ev.CooldownReadout(
+            name=cd.group(1),
+            seconds=int(cd.group(2)) * 60 + int(cd.group(3)), **base)
+    if av := RE_ACTIVATE.match(body):
+        return ev.AbilityActivate(name=av.group(1), **base)
+    if RE_SUMMONED.match(body):
+        return ev.Summoned(**base)
+    if RE_STUNNED.match(body):
+        return ev.Stunned(**base)
+    if RE_MEND.match(body):
+        return ev.Mend(**base)
+    if RE_HIDE_OK.match(body):
+        return ev.Stealth(skill="hide", ok=True, **base)
+    if RE_HIDE_FAIL.match(body):
+        return ev.Stealth(skill="hide", ok=False, **base)
+    if RE_SNEAK_OK.match(body):
+        return ev.Stealth(skill="sneak", ok=True, **base)
+    if RE_SNEAK_FAIL.match(body):
+        return ev.Stealth(skill="sneak", ok=False, **base)
+    if cp := RE_COMPOSITION.match(body):
+        return ev.Composition(class_str=cp.group(1), **base)
     if h := RE_HEAL.match(body):
         return ev.HealReceived(amount=int(h.group(1)), crit=crit, **base)
     if ho := RE_HEAL_OUT.match(body):
         return ev.HealOut(target=ho.group(1), over_time=bool(ho.group(2)),
-                          amount=int(ho.group(3)), spell=ho.group(4),
-                          crit=crit, **base)
+                          amount=int(ho.group(3)),
+                          potential=int(ho.group(4)) if ho.group(4) else None,
+                          spell=ho.group(5), crit=crit, **base)
     if oh := RE_OTHER_HEAL.match(body):
         return ev.OtherHeal(healer=oh.group(1), target=oh.group(2),
                             over_time=bool(oh.group(3)), amount=int(oh.group(4)),
-                            spell=oh.group(5), crit=crit, **base)
+                            potential=int(oh.group(5)) if oh.group(5) else None,
+                            spell=oh.group(6), crit=crit, **base)
 
     if om := RE_OUT_MELEE.match(body):
         verb = _verb_root(om.group(1))

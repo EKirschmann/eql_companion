@@ -312,7 +312,8 @@ async def on_log_event(event: ev.LogEvent, live: bool) -> None:
         return
 
     if event.type in ("other_out", "aa_list", "aa_meta", "who_other",
-                      "pet_inv_header", "pet_gear", "pet_attack"):
+                      "pet_inv_header", "pet_gear", "pet_attack",
+                      "group_chat"):
         return  # aggregated into tracker state; raw broadcast would flood the WS
 
     if event.type == "cast":
@@ -549,7 +550,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.13.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.14.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -1079,6 +1080,44 @@ async def get_gear(refresh: bool = False, cached: bool = False):
     _gear_cache, _gear_sig = advice, sig
     _save_advice_cache()
     return advice
+
+
+@app.get("/api/trio-compare")
+async def trio_compare(db: Session = Depends(get_db)):
+    """Per-trio performance across stored encounters — 'does WAR/BRD/DRU
+    out-farm my other loadout?' (idea per itsspin/spinips Loremaster).
+    Only encounters recorded since v1.14 carry a trio tag."""
+    if not _character_id:
+        return {"trios": []}
+    rows = (db.query(LogEventRow)
+            .filter(LogEventRow.character_id == _character_id,
+                    LogEventRow.event_type == "encounter")
+            .order_by(LogEventRow.ts.desc()).limit(2000).all())
+    agg: dict = {}
+    for r in rows:
+        p = r.payload or {}
+        trio = p.get("trio")
+        if not trio:
+            continue
+        a = agg.setdefault(trio, {"fights": 0, "damage": 0, "seconds": 0.0,
+                                  "zones": {}})
+        a["fights"] += 1
+        a["damage"] += p.get("total_damage") or 0
+        a["seconds"] += p.get("duration") or 0
+        if r.zone:
+            a["zones"][r.zone] = a["zones"].get(r.zone, 0) + 1
+    out = []
+    for trio, a in agg.items():
+        out.append({
+            "trio": trio, "fights": a["fights"],
+            "avg_dps": round(a["damage"] / a["seconds"], 1)
+            if a["seconds"] else 0,
+            "total_damage": a["damage"],
+            "top_zones": [z for z, _n in sorted(
+                a["zones"].items(), key=lambda kv: -kv[1])[:3]],
+        })
+    out.sort(key=lambda x: -x["avg_dps"])
+    return {"trios": out}
 
 
 @app.get("/api/sessions")

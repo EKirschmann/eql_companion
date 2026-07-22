@@ -185,6 +185,7 @@ class OtherHeal(LogEvent):
     spell: str
     over_time: bool = False
     crit: bool = False  # heal crits log since the 2026-07-07 patch
+    potential: Optional[int] = None
 
 
 class MissIn(LogEvent):
@@ -243,8 +244,12 @@ class Loot(LogEvent):
 
 
 class BuffFade(LogEvent):
+    """Your <spell> spell has worn off[ of <target>]. — the target tail
+    is the mez/charm-break signal; pet=True for "Your pet's X" fades."""
     type: str = "buff_fade"
     spell: str
+    target: Optional[str] = None
+    pet: bool = False
 
 
 class HealReceived(LogEvent):
@@ -254,13 +259,15 @@ class HealReceived(LogEvent):
 
 
 class HealOut(LogEvent):
-    """You healed <target> (over time) for N hit points by <spell>."""
+    """You healed <target> (over time) for N (M) hit points by <spell>.
+    `potential` is the parenthesized pre-cap value — overheal evidence."""
     type: str = "heal_out"
     target: str
     amount: int
     spell: str
     over_time: bool = False
     crit: bool = False
+    potential: Optional[int] = None
 
 
 class LocUpdate(LogEvent):
@@ -342,6 +349,66 @@ class Destroyed(LogEvent):
     type: str = "destroyed"
     item: str
     count: int = 1
+
+
+class CooldownReadout(LogEvent):
+    """'You can use the ability X again in 2 minute(s) 30 seconds.' —
+    the game's own remaining-cooldown oracle, printed on an early tap."""
+    type: str = "cooldown_readout"
+    name: str
+    seconds: int
+
+
+class AbilityActivate(LogEvent):
+    """You activate <ability>. — starts known cooldown timers."""
+    type: str = "ability_activate"
+    name: str
+
+
+class Tell(LogEvent):
+    """<sender> tells you, '<text>' — private tell (alert-worthy)."""
+    type: str = "tell"
+    sender: str
+    text: str
+
+
+class GroupChat(LogEvent):
+    """<sender> tells the group/guild/raid, '<text>' — used only for
+    name-mention alerts; never in the ledger (raid chat is spammy)."""
+    type: str = "group_chat"
+    sender: str
+    channel: str
+    text: str
+
+
+class Summoned(LogEvent):
+    """You have been summoned! — always alert-worthy (raid danger)."""
+    type: str = "summoned"
+
+
+class Stunned(LogEvent):
+    """You are stunned! — survivability stat."""
+    type: str = "stunned"
+
+
+class Mend(LogEvent):
+    """Monk Mend: 'You mend your wounds and heal some damage.' — the log
+    prints no amount."""
+    type: str = "mend"
+
+
+class Stealth(LogEvent):
+    """Hide/Sneak skill checks (success or failure)."""
+    type: str = "stealth"
+    skill: str   # "hide" | "sneak"
+    ok: bool
+
+
+class Composition(LogEvent):
+    """'Your active classes are ...' — the log's own trio line (emitted
+    inconsistently, but authoritative when present)."""
+    type: str = "composition"
+    class_str: str
 
 
 class MechanicTimer(LogEvent):

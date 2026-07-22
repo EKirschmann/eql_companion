@@ -92,6 +92,10 @@ export interface Encounter {
   dps: number;
   /** Best 3-second burst window inside the fight. */
   peak_dps?: number;
+  /** Active trio when the fight started (for trio comparison). */
+  trio?: string | null;
+  /** 2-second-bucket damage series for the sparkline (max 4 min). */
+  timeline?: number[];
   abilities: EncounterAbility[];
 }
 
@@ -332,6 +336,14 @@ export interface PetGear {
   slot?: string;
   why: string;
   where?: string;
+}
+
+export interface TrioCompareRow {
+  trio: string;
+  fights: number;
+  avg_dps: number;
+  total_damage: number;
+  top_zones: string[];
 }
 
 export interface SessionSummary {

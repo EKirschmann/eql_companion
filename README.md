@@ -1,10 +1,45 @@
-# EQL Companion
+<p align="center">
+  <img src="docs/logo.svg" alt="EQL Companion" width="640">
+</p>
 
 A real-time companion app for **EverQuest Legends**. It tails your combat log
 and gives you a live HUD in the browser — nothing injected, nothing touching
 the game process. The one thing it can write is optional: recommended spell
 sets into your character's saved-loadout file (with a backup), so one
 in-game `/memspellset companion` loads the whole advised bar.
+
+## In action
+
+**The HUD** — live vitals with per-hour rates and countdown timers, the
+fight breakdown with per-ability crits, your pet's contribution, and
+observed drop rates per mob:
+
+![Live HUD: vitals, timers, encounter breakdown](docs/screenshots/hud-overview.jpg)
+
+**The Advisor** — a wiki-grounded spell loadout for your exact trio and
+level, with one-click write-back into the game's saved spell sets, and
+permanent pre-buffs called out so you never waste a slot:
+
+![Advisor: tiered loadout counsel](docs/screenshots/advisor-loadout.jpg)
+
+**Gear counsel** — every recommendation shows real stats scaled to your
+items' upgrade ranks (a +75 HP swap is framed as a percentage of YOUR
+hit points), above a community-rated leveling chart:
+
+![Gear advisor and leveling chart](docs/screenshots/gear-and-leveling.jpg)
+
+**Exaltations** — every stone you own: what it grants, whether it's
+active or dormant, and exactly which of your items it can legally
+socket into — plus where to farm your next upgrades:
+
+![Exaltation tracking and farming targets](docs/screenshots/exaltations-and-farming.jpg)
+
+**The in-game overlay** — a compact always-on-top meter that lives
+over the game: ranked damage bars, spell/cooldown timers, session
+rates, drop tracking, and loot/kill alerts with an attention banner.
+Click-through by default; Scroll Lock makes it interactive:
+
+<p align="center"><img src="docs/screenshots/overlay.png" width="340" alt="Overlay: damage meter, timers, session rates, alert banner"></p>
 
 **What you get**
 
@@ -82,9 +117,11 @@ cd frontend && npm install && cd ..
 copy .env.example .env
 ```
 
-Edit `.env` and set `EQL_GAME_DIR` to your EverQuest Legends install folder
-(the default is the launcher's standard path; logs and maps are found inside
-it automatically). Optional 2D dungeon charts: extract the Brewall pack from
+You usually do NOT need to set `EQL_GAME_DIR`: the backend tries the
+launcher's standard path and then the game's own registry entry, so even
+custom installs are found automatically (logs and maps derive from it).
+Set it in `.env` only when detection fails. Optional 2D dungeon charts:
+extract the Brewall pack from
 <https://www.eqmaps.info/eq-map-files/> into `<game dir>\maps\Dark Brewall`.
 
 ## Run

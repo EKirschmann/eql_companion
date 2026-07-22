@@ -4,6 +4,48 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.14.0 — 2026-07-22
+
+Combat intelligence round (ideas surveyed from EQBuddy and itsspin/spinips
+— no license on either, so everything here is an independent
+implementation), plus a zero-skill install path and a visual README.
+
+**Deeper combat tracking**
+- **Cooldown oracle**: the game's "You can use the ability X again in
+  M minute(s) S seconds." line now SNAPS the matching cooldown timer
+  exact whenever it prints — vendored estimates only bridge the gaps.
+- **Buff fades carry their target** ("worn off of <target>" — the
+  mez/charm-break tell): fades cancel the matching spell timer and can
+  fire "fade" tracked rules; "Your pet's X" fades recognized and excluded.
+- **Built-in alerts with zero setup**: "You have been summoned!" and your
+  name spoken in group/guild/raid chat always raise the overlay banner —
+  no tracked_rules.json entry needed.
+- **Composition line** ("Your active classes are ...") sets the trio just
+  like /who when all three names resolve.
+- New session counters: stuns taken, mends, stealth state, OVERHEAL (the
+  parenthesized potential value on heal lines), and motes looted by tier.
+
+**Overlay (EQBuddy parity, phase 3)**
+- **Hero band**: FIGHT | SESSION | BEST DPS strip at the top of the
+  overlay, always visible even with every section collapsed.
+- **Pinnable mini-strip**: star a section to keep it in compact mode;
+  Ctrl+Alt+X forces the overlay interactive without Scroll Lock.
+
+**Trio analytics**
+- `GET /api/trio-compare` + a Vitals table: per-trio DPS/kills/deaths
+  comparison across archived sessions — see which class mix farms best.
+- Encounter **timeline sparkline**: 2s damage buckets per fight rendered
+  in the Encounter panel (peak marked).
+
+**Install & docs**
+- INSTALL.md rewritten for people who have never installed anything:
+  numbered checkpoints, the ZIP-extraction trap called out, expanded
+  troubleshooting table.
+- `setup_wizard.py` finds the game via the Windows uninstall registry
+  first (DGC "EverQuest Legends" key), directory scan as fallback.
+- README: StoneGlass SVG logo + an "In action" showcase — four real HUD
+  screenshots plus the desktop overlay mid-fight (alert banner, timers,
+  damage bars, drop rates).
 ## v1.13.0 — 2026-07-22
 
 Built-in timers and alerts — no companion apps needed (durations and
