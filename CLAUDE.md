@@ -528,7 +528,7 @@ model selection itself is runtime-switchable in the UI.
 
 ## Releasing
 
-Latest: **v1.7.0**. MCP server clone at `MCP_SERVER_DIR` is on ArtSabintsev
+Latest: **v1.14.0**. MCP server clone at `MCP_SERVER_DIR` is on ArtSabintsev
 **v1.3.4** (data snapshot refreshed twice weekly; stay on release tags, not
 main — post-1.3.4 has an unreleased TypeScript 6->7 bump). Update the MCP
 with `git merge --ff-only <tag> && npm install && npm run build` in its
