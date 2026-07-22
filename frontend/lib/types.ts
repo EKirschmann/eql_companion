@@ -173,6 +173,10 @@ export interface Snapshot {
   /** User-reported from the in-game UI — the log never prints them. */
   max_hp?: number | null;
   max_mana?: number | null;
+  /** Live countdowns: spell durations from your casts + raid mechanics. */
+  timers?: { name: string; kind: string; seconds: number; remaining: number }[];
+  /** Fired tracked-rule alerts (data/tracked_rules.json). */
+  alerts?: { id: number; ts: string; kind: string; text: string; sound: boolean }[];
   pet_inventory?: Record<string, string>;
   name: string;
   server: string;

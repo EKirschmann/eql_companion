@@ -549,7 +549,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-APP_VERSION = "1.12.0"  # bump together with frontend/lib/version.ts
+APP_VERSION = "1.13.0"  # bump together with frontend/lib/version.ts
 GITHUB_REPO = "EKirschmann/eql_companion"
 
 app = FastAPI(title="EQL Companion", version=APP_VERSION, lifespan=lifespan)
@@ -1094,6 +1094,14 @@ async def get_sessions(limit: int = 12, db: Session = Depends(get_db)):
              .order_by(LogEventRow.ts.desc()).limit(limit).all())
         rows = [r.payload for r in q]
     return {"current": current, "history": rows}
+
+
+@app.get("/api/tracked-rules")
+async def get_tracked_rules():
+    """The user's alert rules (edit data/tracked_rules.json by hand —
+    substring matches on loot/kill/death/zone; reloaded on save)."""
+    from backend import alerts
+    return {"file": str(alerts.RULES_FILE), "rules": alerts.load_rules()}
 
 
 @app.get("/api/loot-filter")

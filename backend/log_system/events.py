@@ -344,6 +344,14 @@ class Destroyed(LogEvent):
     count: int = 1
 
 
+class MechanicTimer(LogEvent):
+    """A raid-mechanic line matched the vendored trigger set (boss shout
+    = Death Touch incoming, breath emote = AE cooldown, ...)."""
+    type: str = "mechanic"
+    name: str
+    seconds: int
+
+
 class SessionStart(LogEvent):
     """'Welcome to EverQuest Legends!' — the login banner. The one true
     session boundary: one log file holds weeks of play."""

@@ -166,6 +166,26 @@ hours-to-level estimate (exact only after a same-session ding).
 `GET /api/sessions` = live summary + history; the Vitals panel shows a
 "Past sessions" table.
 
+## Timers & alerts (no TTS by design)
+
+- **Spell timers** start from OUR cast lines (tier-stripped name looked
+  up in backend/alert_data.py SPELL_TIMERS — community-measured EQL
+  durations vendored from kpxcoolx/eql-alerts, MIT; collisions kept the
+  SHORTEST) and CANCEL on own fizzle/interrupt/outgoing resist. Tier
+  scaling of durations is NOT modeled — timers under-promise.
+- **Raid mechanics** (MECHANICS battery) match at the very END of
+  parse_line — only lines nothing else recognized — and emit
+  ev.MechanicTimer (boss shouts survive the chat guard: NPC shouts have
+  no comma). Timers surface in snapshot["timers"], the overlay TIMERS
+  section, and a Vitals list.
+- **Tracked rules** (backend/alerts.py, data/tracked_rules.json):
+  SUBSTRING-only matches (never regex) on loot/kill/death/zone; 5s
+  per-rule cooldown; live events only; mtime-reloaded on edit. Fired
+  alerts ride snapshot["alerts"]; the OVERLAY renders the banner and
+  plays the winsound chime (nothing else beeps). GET /api/tracked-rules
+  shows the parsed rules. TTS deliberately omitted — point users at
+  the standalone eql-alerts app for voice callouts.
+
 ## Session persistence (survives restarts)
 
 `session_state.py` snapshots the tracker (counters, ledger, encounters,

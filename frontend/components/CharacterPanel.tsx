@@ -166,6 +166,21 @@ export const CharacterPanel = memo(function CharacterPanel({
           </div>
         </div>
 
+        {(snap.timers?.length ?? 0) > 0 && (
+          <ul className="vital-timers" aria-label="Active timers">
+            {(snap.timers ?? []).slice(0, 5).map((tm) => (
+              <li key={tm.name} data-kind={tm.kind} data-short={tm.remaining <= 5 ? "1" : undefined}>
+                <span>{tm.name}</span>
+                <span className="vital-timer-clock">
+                  {tm.remaining >= 60
+                    ? `${Math.floor(tm.remaining / 60)}:${String(tm.remaining % 60).padStart(2, "0")}`
+                    : `${tm.remaining}s`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="tiles">
           <div className="tile" data-accent="out">
             <div className="tile-value">{fmt(s.damage_dealt)}</div>

@@ -1754,3 +1754,17 @@ button.app-version:hover { color: var(--gold-bright); }
 /* counsel consult gets the same obscuring veil as the gear consult */
 .adv-counsel-section { position: relative; }
 .adv-counsel-section > .adv-gear-loading { top: 0; }
+
+/* live timers (Vitals) */
+.vital-timers { list-style: none; margin: 8px 0 4px; padding: 0; font-size: 12px; }
+.vital-timers li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 6px;
+  border-left: 2px solid var(--cast);
+  margin-bottom: 2px;
+  background: var(--inset);
+}
+.vital-timers li[data-kind="raid"] { border-left-color: var(--milestone); }
+.vital-timers li[data-short="1"] .vital-timer-clock { color: var(--dmg-in); font-weight: 600; }
+.vital-timer-clock { font-variant-numeric: tabular-nums; color: var(--muted); }

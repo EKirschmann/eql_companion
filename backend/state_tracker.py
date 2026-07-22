@@ -9,7 +9,8 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Optional
 
-from backend import spell_file
+from backend import alerts, spell_file
+from backend.alert_data import SPELL_TIMERS
 from backend.log_system import events as ev
 from backend.log_system.parser import CLASS_ABBREV, strip_tier
 
@@ -135,6 +136,13 @@ class CharacterTracker:
         self.coin_copper = 0  # session coin total, all sources (in copper)
         self.rune_absorbed = 0  # damage eaten by rune buffs this session
         self.loot_count = 0     # total items looted this session
+        # live countdowns (spell durations from OUR casts + raid
+        # mechanics) and fired tracked-rule alerts — transient, never
+        # persisted
+        self.active_timers: list = []
+        self.alerts: deque = deque(maxlen=8)
+        self._alert_seq = 0
+        self._alert_cooldown: dict = {}
         # finished sessions awaiting DB persistence (login banner rolls
         # the session over; drained by the flush loop like encounters)
         self.pending_sessions: list = []
@@ -258,6 +266,8 @@ class CharacterTracker:
         if isinstance(e, ev.ZoneChange):
             self.zone = e.zone
             self.position = None  # old coords are meaningless in a new zone
+            if live:
+                self._fire_alerts("zone", e.zone, e.ts)
         elif isinstance(e, ev.LocUpdate) and live:
             self.position = {"x": e.x, "y": e.y, "z": e.z, "ts": e.ts.isoformat()}
         elif isinstance(e, ev.LevelUp):
@@ -305,6 +315,10 @@ class CharacterTracker:
             if e.spell:  # log evidence for proc-vs-cast disambiguation
                 self.spell_casts.add(e.spell.lower())
                 self.spell_casts.add(strip_tier(e.spell).lower())
+                if live:
+                    secs = SPELL_TIMERS.get(strip_tier(e.spell).lower())
+                    if secs:
+                        self._start_timer(e.spell, secs, "spell", e.ts)
         elif isinstance(e, ev.AAListEntry):
             # ownership data, not session data: applies in seed replay too.
             # Skip listings OLDER than what we already hold (e.g. the seed
@@ -445,6 +459,7 @@ class CharacterTracker:
                                      crit=e.crit)
             elif isinstance(e, ev.Kill):
                 self.kills += 1
+                self._fire_alerts("kill", e.target, e.ts)
                 mob = _foe_key(e.target)
                 self._mob(mob)["kills"] += 1
                 self._last_kill = (mob, e.ts)
@@ -471,6 +486,12 @@ class CharacterTracker:
                         (e.ts - self.encounter["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS
                         and mob in self.encounter.get("foes", {})):
                     self._encounter_foe(e.victim, slain=True)
+            elif isinstance(e, ev.MechanicTimer):
+                self._start_timer(e.name, e.seconds, "raid", e.ts)
+            elif isinstance(e, ev.CastFizzle):
+                self._cancel_timer(e.spell)
+            elif isinstance(e, ev.CastInterrupted):
+                self._cancel_timer(e.spell)
             elif isinstance(e, ev.SessionStart):
                 summ = self.session_summary()
                 if (summ["kills"] or summ["xp_percent"] or summ["loot_count"]
@@ -485,6 +506,7 @@ class CharacterTracker:
                 # and never opens an encounter
                 self.damage_taken += e.damage
             elif isinstance(e, ev.MyDeath):
+                self._fire_alerts("death", "slain by " + e.killer, e.ts)
                 self.deaths += 1
                 self.last_death = self._death_recap(e)
             elif isinstance(e, ev.ExpGain):
@@ -515,6 +537,7 @@ class CharacterTracker:
                     label += " (banked)"
                 self.loots.appendleft(label)
                 self.loot_count += max(e.count, 1)
+                self._fire_alerts("loot", e.item, e.ts)
                 # loot lines name the corpse: exact per-mob attribution
                 if e.source and "'s corpse" in e.source:
                     mob = _foe_key(e.source.split("'s corpse")[0].strip())
@@ -530,6 +553,7 @@ class CharacterTracker:
                     # it for forward attribution exactly like XP
                     self._pending_coin = (e.ts, copper)
             elif isinstance(e, ev.Resist) and e.direction == "out":
+                self._cancel_timer(e.spell)
                 enc = self.encounter
                 if (enc is not None and
                         (e.ts - enc["last"]).total_seconds() <= COMBAT_TIMEOUT_SECONDS):
@@ -555,6 +579,47 @@ class CharacterTracker:
         value = total / max(span, 1.0)
         self.session_max_dps = max(self.session_max_dps, value)
         return round(value, 1)
+
+    def _start_timer(self, name: str, seconds: int, kind: str,
+                     ts: datetime) -> None:
+        self.active_timers = [t for t in self.active_timers
+                              if t["name"] != name][-9:]
+        self.active_timers.append({
+            "name": name, "kind": kind, "seconds": seconds,
+            "ends": ts + timedelta(seconds=seconds)})
+
+    def _cancel_timer(self, spell: Optional[str]) -> None:
+        """Fizzle/interrupt/resist: the effect never landed."""
+        if not spell:
+            return
+        low = strip_tier(spell).lower()
+        self.active_timers = [
+            t for t in self.active_timers
+            if strip_tier(t["name"]).lower() != low]
+
+    def timers_view(self) -> list:
+        now = datetime.now()
+        self.active_timers = [t for t in self.active_timers
+                              if t["ends"] > now]
+        return sorted(
+            ({"name": t["name"], "kind": t["kind"],
+              "seconds": t["seconds"],
+              "remaining": round((t["ends"] - now).total_seconds())}
+             for t in self.active_timers),
+            key=lambda t: t["remaining"])
+
+    def _fire_alerts(self, kind: str, text: str, ts: datetime) -> None:
+        for rule in alerts.match(kind, text):
+            key = rule["kind"] + ":" + rule["pattern"]
+            last = self._alert_cooldown.get(key)
+            if last and (ts - last).total_seconds() < 5:
+                continue
+            self._alert_cooldown[key] = ts
+            self._alert_seq += 1
+            self.alerts.append({
+                "id": self._alert_seq, "ts": ts.isoformat(),
+                "kind": rule["kind"], "text": text,
+                "sound": bool(rule.get("sound", True))})
 
     def session_summary(self) -> dict:
         """Snapshot of the CURRENT session's headline numbers — archived
@@ -936,6 +1001,8 @@ class CharacterTracker:
                 key=lambda s: s["kills"], reverse=True)[:10],
             "zone": self.zone,
             "rates": self.rates(),
+            "timers": self.timers_view(),
+            "alerts": list(self.alerts),
             "in_combat": self.in_combat(),
             "dps": self.dps(),
             "session_max_dps": round(self.session_max_dps, 1),

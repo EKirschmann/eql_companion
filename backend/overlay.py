@@ -54,7 +54,8 @@ ROW_H = 17
 TROW_H = 14
 HINT_H = 13
 
-SECTIONS = ("combat", "session", "loot", "progress")
+SECTIONS = ("combat", "timers", "session", "loot", "progress")
+ALERT_BANNER_SECS = 6.0
 
 # EQ class colors (first abbrev of the trio decides the bar color)
 CLASS_COLORS = {
@@ -126,6 +127,18 @@ def compute_rows(snap, history, segment):
     return rows[:8], label
 
 
+def timer_rows(snap):
+    """TIMERS section: live countdowns, soonest first, red when short."""
+    rows = []
+    for t in ((snap or {}).get("timers") or [])[:6]:
+        rem = t.get("remaining", 0)
+        mins, secs = divmod(max(0, int(rem)), 60)
+        clock = f"{mins}:{secs:02d}" if mins else f"{secs}s"
+        color = RED if rem <= 5 else (GOLD if t.get("kind") == "raid" else INK)
+        rows.append((t.get("name", "?")[:30], clock, color))
+    return rows or [("no active timers", "", MUTED)]
+
+
 def session_rows(snap):
     """SESSION section: [(left, right, color)]."""
     s = (snap or {}).get("session") or {}
@@ -187,6 +200,12 @@ def section_summary(key, snap, history, segment):
         r = (snap or {}).get("rates") or {}
         return (f"{s.get('kills', 0)}k · "
                 f"{(r.get('xp') or {}).get('active_hr', 0):g}%/hr")
+    if key == "timers":
+        timers = (snap or {}).get("timers") or []
+        if not timers:
+            return "—"
+        t = timers[0]
+        return f"{t.get('name', '?')[:16]} {t.get('remaining', 0)}s"
     if key == "loot":
         loots = ((snap or {}).get("session") or {}).get("loots") or []
         return (loots[0][:22] if loots else "—")
@@ -218,6 +237,9 @@ class OverlayMeter:
         self._moved = False
         self._transparent = None
         self._sec_zones = []  # [(y0, y1, key)] rebuilt every render
+        self._last_alert_id = 0
+        self._alert_until = 0.0
+        self._alert_text = ""
 
         self.canvas = tk.Canvas(self.root, width=W, bg=BG,
                                 highlightthickness=0, bd=0)
@@ -413,6 +435,27 @@ class OverlayMeter:
                           fill=HEAL if live else MUTED,
                           font=("Consolas", 9, "bold"), text=f"{my_dps:g}")
 
+        # tracked-rule alert banner (+ chime once per alert)
+        alerts = (self.snap or {}).get("alerts") or []
+        if alerts:
+            latest = alerts[-1]
+            if latest.get("id", 0) > self._last_alert_id:
+                self._last_alert_id = latest.get("id", 0)
+                self._alert_until = time.time() + ALERT_BANNER_SECS
+                self._alert_text = f"{latest.get('kind', '')}: {latest.get('text', '')}"
+                if latest.get("sound"):
+                    try:
+                        import winsound
+                        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                    except Exception:
+                        pass
+        if time.time() < self._alert_until:
+            c.create_rectangle(0, y, W, y + TROW_H, fill=GOLD, width=0)
+            c.create_text(6, y + TROW_H // 2, anchor="w", fill=BG,
+                          font=("Consolas", 8, "bold"),
+                          text=self._alert_text[:44])
+            y += TROW_H
+
         if not self.snap:
             c.create_text(8, y + TROW_H // 2, anchor="w", fill=RED,
                           font=("Consolas", 9),
@@ -446,7 +489,10 @@ class OverlayMeter:
                                   font=("Consolas", 9),
                                   text=f"{val} ({share:.0f}%)")
                 y += len(rows) * ROW_H
-            # ---- SESSION / LOOT / PROGRESS ----
+            # ---- TIMERS / SESSION / LOOT / PROGRESS ----
+            y = self._sec_header(c, y, "timers", "TIMERS")
+            if not self.collapsed["timers"]:
+                y = self._text_rows(c, y, timer_rows(self.snap))
             y = self._sec_header(c, y, "session", "SESSION")
             if not self.collapsed["session"]:
                 y = self._text_rows(c, y, session_rows(self.snap))

@@ -4,6 +4,30 @@ Notable changes per release. Check for updates by clicking the version badge
 in the app header; update by closing the companion and running
 `update_companion.bat`.
 
+## v1.13.0 — 2026-07-22
+
+Built-in timers and alerts — no companion apps needed (durations and
+raid triggers vendored from kpxcoolx/eql-alerts, MIT):
+
+- **Spell countdowns**: casting any of 159 spells with
+  community-measured EQL durations starts a timer (Splurt 102s,
+  Mesmerize 24s, Clarity 27m, ...). A fizzle, interrupt, or resist of
+  that spell cancels it — no false countdowns on a resisted mez.
+  Durations don't model tier scaling, so timers err short.
+- **Raid mechanic warnings**: Nagafen/Vox breath and Dragon Roar
+  cooldowns, Cazic Thule's add-spawn shout, Death Touch timers for all
+  seven Plane of Sky bosses and Master Yael — recognized straight from
+  the log.
+- **Where you see them**: a new TIMERS section in the overlay (soonest
+  first, red under 5 seconds, gold for raid mechanics) and a matching
+  list under the DPS gauge in the Vitals panel.
+- **Tracked alerts**: edit data/tracked_rules.json (created for you
+  with an example) — plain substring rules on loot / kill / death /
+  zone. A match flashes a gold banner across the overlay for 6 seconds
+  and plays a Windows chime (per-rule sound toggle, 5s cooldown, never
+  fires during the startup replay). The file reloads automatically
+  when you save it. No text-to-speech by design — if you want voice
+  callouts, the standalone eql-alerts app remains the tool for that.
 ## v1.12.0 — 2026-07-22
 
 The overlay grows up (EQBuddy-inspired), and the companion learns what

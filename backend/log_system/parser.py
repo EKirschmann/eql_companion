@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.log_system import events as ev
+from backend.alert_data import MECHANICS
 
 TS_RE = re.compile(r"^\[(.+?)\] (.*)$")
 TS_FMT = "%a %b %d %H:%M:%S %Y"
@@ -450,5 +451,12 @@ def parse_line(line: str, character_name: Optional[str] = None) -> Optional[ev.L
         # other players feed the group roster (keep the game's abbreviations)
         return ev.OtherCharInfo(name=w.group(3), level=int(w.group(1)),
                                 classes=class_str, **base)
+
+    # raid-mechanic trigger battery — LAST, so it only ever scans lines
+    # nothing above recognized (boss shouts carry no comma, so the chat
+    # guard lets them through)
+    for mname, mrx, msecs in MECHANICS:
+        if mrx.search(body):
+            return ev.MechanicTimer(name=mname, seconds=msecs, **base)
 
     return None
